@@ -902,6 +902,16 @@ async function init() {
     setupSearch();
     setupFilterTabs();
 
+    // Register service worker for PWA support
+    if ('serviceWorker' in navigator) {
+        try {
+            const registration = await navigator.serviceWorker.register('/sw.js');
+            console.log('✅ Service worker registered:', registration.scope);
+        } catch (error) {
+            console.error('❌ Service worker registration failed:', error);
+        }
+    }
+
     cardStack.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading movies…</p></div>';
 
     await ensureAuth();

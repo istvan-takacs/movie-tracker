@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" rx="64" fill="#1E1E1E"/>
+  <g transform="translate(96, 72)">
+    <!-- Film strip left perforation -->
+    <rect x="20" y="60" width="24" height="20" rx="4" fill="#62325e"/>
+    <rect x="20" y="100" width="24" height="20" rx="4" fill="#62325e"/>
+    <rect x="20" y="140" width="24" height="20" rx="4" fill="#62325e"/>
+    <rect x="20" y="180" width="24" height="20" rx="4" fill="#62325e"/>
+    <rect x="20" y="220" width="24" height="20" rx="4" fill="#62325e"/>
+    <rect x="20" y="260" width="24" height="20" rx="4" fill="#62325e"/>
+    <!-- Film strip right perforation -->
+    <rect x="276" y="60" width="24" height="20" rx="4" fill="#62325e"/>
+    <rect x="276" y="100" width="24" height="20" rx="4" fill="#62325e"/>
+    <rect x="276" y="140" width="24" height="20" rx="4" fill="#62325e"/>
+    <rect x="276" y="180" width="24" height="20" rx="4" fill="#62325e"/>
+    <rect x="276" y="220" width="24" height="20" rx="4" fill="#62325e"/>
+    <rect x="276" y="260" width="24" height="20" rx="4" fill="#62325e"/>
+    <!-- Film strip body -->
+    <rect x="10" y="48" width="300" height="244" rx="12" fill="none" stroke="#62325e" stroke-width="8"/>
+    <!-- Screen / poster area -->
+    <rect x="56" y="68" width="208" height="150" rx="8" fill="#401628"/>
+    <!-- Play button -->
+    <polygon points="136,118 136,168 176,143" fill="#F5C518"/>
+    <!-- Title bar -->
+    <rect x="56" y="234" width="140" height="12" rx="6" fill="#F5C518"/>
+    <rect x="56" y="256" width="90" height="8" rx="4" fill="#62325e"/>
+  </g>
+</svg>

@@ -1,14 +1,37 @@
 {
   "name": "Movie Tracker",
-  "short_name": "Movie Tracker",
-  "description": "Tracking movies using TMDB API",
+  "short_name": "Movies",
+  "description": "Track upcoming theatrical and streaming releases",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#141414",
-  "theme_color": "#F5C518",
+  "background_color": "#1E1E1E",
+  "theme_color": "#62325e",
   "orientation": "portrait",
   "scope": "/",
   "icons": [
-    
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
   ]
 }
