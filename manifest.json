@@ -1,0 +1,14 @@
+{
+  "name": "Movie Tracker",
+  "short_name": "Movie Tracker",
+  "description": "Tracking movies using TMDB API",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#141414",
+  "theme_color": "#F5C518",
+  "orientation": "portrait",
+  "scope": "/",
+  "icons": [
+    
+  ]
+}

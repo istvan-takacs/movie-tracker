@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#F5C518">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Movie Tracker</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="manifest" href="manifest.json">
+</head>
+<body>
+<header>
+    <h1>Movie Tracker</h1>
+</header>
+
+<main>
+    <!-- View 1: Discover -->
+    <section id="view-discover" class="view active">
+        <!-- Search bar -->
+        <div class="search-bar">
+            <input type="text" id="search-input" placeholder="Search for a movie…" autocomplete="off">
+            <button id="search-clear" class="search-clear hidden" aria-label="Clear search">✕</button>
+        </div>
+
+        <!-- Source filter tabs -->
+        <div class="filter-tabs-row">
+            <button class="filter-tab active" data-source="all">All</button>
+            <button class="filter-tab" data-source="theatrical">Theatrical</button>
+            <button class="filter-tab" data-source="streaming">Streaming</button>
+        </div>
+
+        <!-- Notification prompt -->
+        <button id="btn-notifications" class="notification-prompt">
+            🔔 Enable release notifications
+        </button>
+
+        <p id="discover-counter" class="discover-counter hidden"></p>
+        <div id="card-stack"></div>
+        <div class="swipe-buttons">
+            <button id="btn-dismiss" aria-label="Dismiss">✕</button>
+            <button id="btn-interested" aria-label="Add to watchlist">✓</button>
+        </div>
+        <p class="swipe-hint">Swipe or use ← → keys</p>
+    </section>
+
+    <!-- View 2: Watchlist -->
+    <section id="view-watchlist" class="view">
+        <h2 class="view-title">Watchlist</h2>
+        <div id="watchlist-container"></div>
+    </section>
+
+    <!-- View 3: Dismissed -->
+    <section id="view-dismissed" class="view">
+        <h2 class="view-title">Dismissed</h2>
+        <div id="dismissed-container"></div>
+    </section>
+</main>
+
+<!-- Toast notification -->
+<div id="toast" class="toast"></div>
+
+<nav class="bottom-tabs">
+    <button data-view="discover" class="active">Discover</button>
+    <button data-view="watchlist">
+        Watchlist
+        <span id="badge-watchlist" class="tab-badge hidden">0</span>
+    </button>
+    <button data-view="dismissed">
+        Dismissed
+        <span id="badge-dismissed" class="tab-badge hidden">0</span>
+    </button>
+</nav>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
