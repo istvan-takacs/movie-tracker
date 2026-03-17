@@ -1,15 +1,19 @@
-const CACHE_NAME = 'movietracker-v1';
+const CACHE_NAME = 'movietracker-v2';
 
-const PRE_CACHE = [
-    '/',
-    '/index.html',
-    '/style.css',
-    '/app.js',
-    '/firebase-config.js',
-    '/manifest.json',
-    '/icons/icon-192.png',
-    '/icons/icon-512.png',
+// Derive base path from SW location (works on both localhost and GitHub Pages)
+const BASE = new URL('.', self.location).pathname;
+
+const PRE_CACHE_FILES = [
+    '',
+    'index.html',
+    'style.css',
+    'app.js',
+    'firebase-config.js',
+    'manifest.json',
+    'icons/icon-192.png',
+    'icons/icon-512.png',
 ];
+const PRE_CACHE = PRE_CACHE_FILES.map(f => BASE + f);
 
 // ─── Install: pre-cache core assets ────────────────────────────────
 self.addEventListener('install', (event) => {
@@ -119,7 +123,7 @@ self.addEventListener('fetch', (event) => {
                     .catch(() => {
                         // Offline navigation fallback
                         if (event.request.mode === 'navigate') {
-                            return caches.match('/index.html');
+                            return caches.match(BASE + 'index.html');
                         }
                     });
             })

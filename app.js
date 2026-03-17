@@ -27,6 +27,7 @@ let currentIndex = 0;
 let currentPage = 1;
 let totalPages = Infinity;        // track TMDB total pages to stop fetching
 let isLoading = false;
+let loadGeneration = 0;           // incremented on filter/search change to cancel stale loads
 let isSwiping = false;
 let trailerCache = new Map();     // tmdbId → YouTube URL (or null)
 let castCache = new Map();        // tmdbId → [ { name, character, profilePath }, ... ]
@@ -189,7 +190,7 @@ function listenToDecisions() {
     onSnapshot(moviesRef, (snapshot) => {
         userMovies.clear();
         snapshot.forEach((d) => {
-            userMovies.set(d.data().tmdbId, d.data());
+            userMovies.set(Number(d.data().tmdbId), d.data());
         });
         renderWatchlist();
         renderDismissed();
@@ -200,11 +201,11 @@ function listenToDecisions() {
 
 // ─── Discover feed ───────────────────────────────────────────────────
 function getUndecidedMovies(movies) {
-    return movies.filter(m => !userMovies.has(m.id));
+    return movies.filter(m => !userMovies.has(Number(m.id)));
 }
 
 async function loadMoreMovies() {
-    if (isLoading) return;
+    const gen = loadGeneration;
     isLoading = true;
     try {
         let newMovies = [];
@@ -212,6 +213,7 @@ async function loadMoreMovies() {
         if (activeSource === 'theatrical' || activeSource === 'all') {
             if (theatricalPage <= theatricalTotalPages) {
                 const theatrical = await fetchUpcoming(theatricalPage);
+                if (gen !== loadGeneration) return; // filter changed mid-fetch
                 newMovies.push(...theatrical);
                 theatricalPage++;
             }
@@ -220,6 +222,7 @@ async function loadMoreMovies() {
         if (activeSource === 'streaming' || activeSource === 'all') {
             if (streamingPage <= streamingTotalPages) {
                 const streaming = await fetchStreaming(streamingPage);
+                if (gen !== loadGeneration) return; // filter changed mid-fetch
                 newMovies.push(...streaming);
                 streamingPage++;
             }
@@ -436,6 +439,8 @@ function exitSearchMode() {
     isSearchMode = false;
     currentMovies = [];
     currentIndex = 0;
+    loadGeneration++;
+    isLoading = false;
     // Reset page counters and reload
     resetPagination();
     loadMoreMovies().then(() => showCurrentCard());
@@ -462,6 +467,8 @@ function setupFilterTabs() {
             // Reset and reload with new source
             currentMovies = [];
             currentIndex = 0;
+            loadGeneration++;
+            isLoading = false;
             resetPagination();
 
             cardStack.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading…</p></div>';
@@ -905,7 +912,8 @@ async function init() {
     // Register service worker for PWA support
     if ('serviceWorker' in navigator) {
         try {
-            const registration = await navigator.serviceWorker.register('/sw.js');
+            const swPath = new URL('sw.js', document.baseURI).pathname;
+            const registration = await navigator.serviceWorker.register(swPath);
             console.log('✅ Service worker registered:', registration.scope);
         } catch (error) {
             console.error('❌ Service worker registration failed:', error);
