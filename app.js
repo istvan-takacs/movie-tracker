@@ -555,6 +555,8 @@ function setupSwipeHandlers(card) {
     }
 
     card.addEventListener('touchstart', (e) => {
+        // Don't swipe when touching scrollable/interactive areas
+        if (e.target.closest('.cast-row, .genre-badges, a, button, .overview')) return;
         const t = e.touches[0];
         onStart(t.clientX, t.clientY);
     }, { passive: true });
@@ -568,7 +570,7 @@ function setupSwipeHandlers(card) {
     card.addEventListener('touchend', onEnd);
 
     card.addEventListener('mousedown', (e) => {
-        if (e.target.closest('a, button, .overview')) return;
+        if (e.target.closest('.cast-row, .genre-badges, a, button, .overview')) return;
         e.preventDefault();
         onStart(e.clientX, e.clientY);
 
