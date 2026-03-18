@@ -289,6 +289,16 @@ h1 {
     transform: rotate(-12deg);
 }
 
+.overlay-skip {
+    top: auto;
+    bottom: 1.5rem;
+    left: 50%;
+    transform: translateX(-50%);
+    color: var(--accent-gold);
+    border: 3px solid var(--accent-gold);
+    background: rgba(245, 197, 24, 0.15);
+}
+
 /* ─── Card info ───────────────────────────────────────────────────── */
 
 .card-info {

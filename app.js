@@ -34,6 +34,7 @@ let castCache = new Map();        // tmdbId → [ { name, character, profilePath
 let activeSource = 'all';         // 'all', 'theatrical', 'streaming'
 let isSearchMode = false;
 let searchDebounceTimer = null;
+let skippedQueue = [];            // movies skipped via down-swipe, re-shown after queue exhausted
 
 // Separate page counters per source
 let theatricalPage = 1;
@@ -257,6 +258,13 @@ function showCurrentCard() {
     cardStack.innerHTML = '';
     updateDiscoverCounter();
 
+    // Re-append skipped movies when queue is exhausted
+    if (currentIndex >= currentMovies.length && skippedQueue.length > 0) {
+        currentMovies.push(...skippedQueue);
+        skippedQueue = [];
+        showToast('Showing skipped movies again');
+    }
+
     if (currentIndex >= currentMovies.length) {
         const msg = isSearchMode
             ? 'No results found.'
@@ -293,6 +301,7 @@ function showCurrentCard() {
     card.innerHTML = `
         <div class="swipe-overlay overlay-interested">INTERESTED</div>
         <div class="swipe-overlay overlay-nope">NOPE</div>
+        <div class="swipe-overlay overlay-skip">SKIP</div>
         ${posterUrl
             ? `<img src="${posterUrl}" alt="${movie.title}" draggable="false">`
             : '<div class="no-poster">No Poster</div>'}
@@ -482,6 +491,7 @@ function resetPagination() {
     theatricalTotalPages = Infinity;
     streamingPage = 1;
     streamingTotalPages = Infinity;
+    skippedQueue = [];
 }
 
 // ─── Swipe gestures ──────────────────────────────────────────────────
@@ -489,8 +499,9 @@ function setupSwipeHandlers(card) {
     let startX = 0;
     let startY = 0;
     let deltaX = 0;
+    let deltaY = 0;
     let isTracking = false;
-    let isHorizontal = null;
+    let direction = null; // 'horizontal' | 'vertical-down' | null
 
     const THRESHOLD = 80;
     const DIRECTION_LOCK = 10;
@@ -500,8 +511,9 @@ function setupSwipeHandlers(card) {
         startX = x;
         startY = y;
         deltaX = 0;
+        deltaY = 0;
         isTracking = true;
-        isHorizontal = null;
+        direction = null;
         card.style.transition = 'none';
     }
 
@@ -511,31 +523,49 @@ function setupSwipeHandlers(card) {
         const dx = x - startX;
         const dy = y - startY;
 
-        if (isHorizontal === null && (Math.abs(dx) > DIRECTION_LOCK || Math.abs(dy) > DIRECTION_LOCK)) {
-            isHorizontal = Math.abs(dx) > Math.abs(dy);
-            if (!isHorizontal) {
+        if (direction === null && (Math.abs(dx) > DIRECTION_LOCK || Math.abs(dy) > DIRECTION_LOCK)) {
+            if (Math.abs(dx) > Math.abs(dy)) {
+                direction = 'horizontal';
+            } else if (dy > DIRECTION_LOCK) {
+                direction = 'vertical-down';
+            } else {
+                // Vertical up — cancel tracking, allow page scroll
                 isTracking = false;
                 card.style.transform = '';
                 return;
             }
         }
 
-        if (!isHorizontal) return;
-
-        deltaX = dx;
-        const rotation = deltaX * 0.08;
-        card.style.transform = `translateX(${deltaX}px) rotate(${rotation}deg)`;
+        if (!direction) return;
 
         const overlayInterested = card.querySelector('.overlay-interested');
         const overlayNope = card.querySelector('.overlay-nope');
-        const progress = Math.min(Math.abs(deltaX) / THRESHOLD, 1);
+        const overlaySkip = card.querySelector('.overlay-skip');
 
-        if (deltaX > 0) {
-            overlayInterested.style.opacity = progress;
-            overlayNope.style.opacity = 0;
+        if (direction === 'horizontal') {
+            deltaX = dx;
+            const rotation = deltaX * 0.08;
+            card.style.transform = `translateX(${deltaX}px) rotate(${rotation}deg)`;
+
+            const progress = Math.min(Math.abs(deltaX) / THRESHOLD, 1);
+            overlaySkip.style.opacity = 0;
+            if (deltaX > 0) {
+                overlayInterested.style.opacity = progress;
+                overlayNope.style.opacity = 0;
+            } else {
+                overlayNope.style.opacity = progress;
+                overlayInterested.style.opacity = 0;
+            }
         } else {
-            overlayNope.style.opacity = progress;
+            // vertical-down
+            deltaY = Math.max(0, dy); // only allow downward
+            const scale = Math.max(0.9, 1 - deltaY * 0.0005);
+            card.style.transform = `translateY(${deltaY}px) scale(${scale})`;
+
+            const progress = Math.min(deltaY / THRESHOLD, 1);
             overlayInterested.style.opacity = 0;
+            overlayNope.style.opacity = 0;
+            overlaySkip.style.opacity = progress;
         }
     }
 
@@ -543,14 +573,17 @@ function setupSwipeHandlers(card) {
         if (!isTracking) return;
         isTracking = false;
 
-        if (Math.abs(deltaX) > THRESHOLD) {
+        if (direction === 'horizontal' && Math.abs(deltaX) > THRESHOLD) {
             const status = deltaX > 0 ? 'interested' : 'dismissed';
             commitSwipe(card, status, deltaX > 0 ? 1 : -1);
+        } else if (direction === 'vertical-down' && deltaY > THRESHOLD) {
+            commitSwipe(card, 'skipped', 0);
         } else {
             card.style.transition = 'transform 0.3s ease';
             card.style.transform = '';
             card.querySelector('.overlay-interested').style.opacity = 0;
             card.querySelector('.overlay-nope').style.opacity = 0;
+            card.querySelector('.overlay-skip').style.opacity = 0;
         }
     }
 
@@ -564,7 +597,7 @@ function setupSwipeHandlers(card) {
     card.addEventListener('touchmove', (e) => {
         const t = e.touches[0];
         onMove(t.clientX, t.clientY);
-        if (isHorizontal) e.preventDefault();
+        if (direction) e.preventDefault();
     }, { passive: false });
 
     card.addEventListener('touchend', onEnd);
@@ -590,13 +623,26 @@ async function commitSwipe(card, status, direction) {
     isSwiping = true;
 
     card.style.transition = 'transform 0.35s ease, opacity 0.35s ease';
-    card.style.transform = `translateX(${direction * 500}px) rotate(${direction * 20}deg)`;
-    card.style.opacity = '0';
+
+    if (status === 'skipped') {
+        card.style.transform = 'translateY(500px) scale(0.8)';
+        card.style.opacity = '0';
+    } else {
+        card.style.transform = `translateX(${direction * 500}px) rotate(${direction * 20}deg)`;
+        card.style.opacity = '0';
+    }
 
     const movie = currentMovies[currentIndex];
     await sleep(200);
-    await saveDecision(movie, status);
-    showToast(status === 'interested' ? `Added "${movie.title}" to watchlist ✓` : `Dismissed "${movie.title}"`);
+
+    if (status === 'skipped') {
+        skippedQueue.push(movie);
+        showToast(`Skipped "${movie.title}"`);
+    } else {
+        await saveDecision(movie, status);
+        showToast(status === 'interested' ? `Added "${movie.title}" to watchlist ✓` : `Dismissed "${movie.title}"`);
+    }
+
     currentIndex++;
     showCurrentCard();
 
