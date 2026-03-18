@@ -371,6 +371,7 @@ h1 {
     margin-bottom: var(--gap-sm);
     scrollbar-width: none;
     -ms-overflow-style: none;
+    touch-action: pan-x pan-y;
 }
 
 .cast-row::-webkit-scrollbar {
