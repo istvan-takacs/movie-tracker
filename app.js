@@ -1,9 +1,9 @@
 // ─── Firebase imports ────────────────────────────────────────────────
 import { firebaseConfig } from './firebase-config.js';
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-app.js";
-import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot }
+import { getFirestore, collection, doc, setDoc, deleteDoc, getDocs, onSnapshot }
     from "https://www.gstatic.com/firebasejs/12.10.0/firebase-firestore.js";
-import { getAuth, signInAnonymously, onAuthStateChanged }
+import { getAuth, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signInWithCredential, linkWithPopup, signOut }
     from "https://www.gstatic.com/firebasejs/12.10.0/firebase-auth.js";
 
 // ─── Firebase init ───────────────────────────────────────────────────
@@ -34,6 +34,7 @@ let castCache = new Map();        // tmdbId → [ { name, character, profilePath
 let activeSource = 'all';         // 'all', 'theatrical', 'streaming'
 let isSearchMode = false;
 let searchDebounceTimer = null;
+let isGoogleSignInProgress = false; // guard against onAuthStateChanged re-triggering anon sign-in
 let skippedQueue = [];            // movies skipped via down-swipe, re-shown after queue exhausted
 
 // Separate page counters per source
@@ -56,17 +57,133 @@ const searchClear = document.getElementById('search-clear');
 const filterTabs = document.querySelectorAll('.filter-tab');
 
 // ─── Auth ────────────────────────────────────────────────────────────
+const googleProvider = new GoogleAuthProvider();
+
 function ensureAuth() {
     return new Promise((resolve) => {
+        let resolved = false;
         onAuthStateChanged(auth, (user) => {
             if (user) {
+                const prevUid = currentUser ? currentUser.uid : null;
                 currentUser = user;
-                resolve(user);
-            } else {
+                updateAuthUI();
+                // Re-attach Firestore listener if user changed (e.g., anon → Google)
+                if (prevUid && prevUid !== user.uid) {
+                    listenToDecisions();
+                    // Re-filter the discover feed for the new user's decisions
+                    showCurrentCard();
+                }
+                if (!resolved) { resolved = true; resolve(user); }
+            } else if (!isGoogleSignInProgress) {
                 signInAnonymously(auth);
             }
         });
     });
+}
+
+async function signInWithGoogle() {
+    isGoogleSignInProgress = true;
+    try {
+        if (currentUser && currentUser.isAnonymous) {
+            // Link anonymous account to Google — preserves UID and all data
+            const result = await linkWithPopup(currentUser, googleProvider);
+            currentUser = result.user;
+            showToast('Signed in — your watchlist is now saved to your Google account');
+        } else {
+            // Direct sign-in (no anonymous session to link)
+            const result = await signInWithPopup(auth, googleProvider);
+            currentUser = result.user;
+            showToast('Signed in as ' + (currentUser.displayName || currentUser.email || 'Google user'));
+        }
+    } catch (err) {
+        if (err.code === 'auth/credential-already-in-use') {
+            // Google account already linked to another UID — sign in with the
+            // existing credential directly (no second popup needed)
+            const credential = GoogleAuthProvider.credentialFromError(err);
+            const anonUid = currentUser ? currentUser.uid : null;
+            const anonUser = currentUser; // save ref to delete orphaned anon account
+            if (credential) {
+                const result = await signInWithCredential(auth, credential);
+                currentUser = result.user;
+            } else {
+                // Fallback: open a new popup if credential extraction failed
+                const result = await signInWithPopup(auth, googleProvider);
+                currentUser = result.user;
+            }
+            // Merge any movies the user added while anonymous into their Google account
+            await mergeAndCleanupAnonData(anonUid, currentUser.uid);
+            // Delete the orphaned anonymous Auth user
+            try { if (anonUser && anonUser.isAnonymous) await anonUser.delete(); } catch (_) { /* best effort */ }
+            showToast('Signed in as ' + (currentUser.displayName || currentUser.email || 'Google user'));
+        } else if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
+            // User closed the popup — do nothing
+        } else {
+            console.error('Google sign-in failed:', err);
+            showToast('Sign-in failed. Please try again.');
+        }
+    } finally {
+        isGoogleSignInProgress = false;
+    }
+    updateAuthUI();
+}
+
+/**
+ * Merge movies from an anonymous user's Firestore collection into the
+ * Google-authenticated user's collection, then delete the orphaned docs.
+ */
+async function mergeAndCleanupAnonData(anonUid, googleUid) {
+    if (!anonUid || !googleUid || anonUid === googleUid) return;
+    try {
+        const anonMoviesRef = collection(db, 'users', anonUid, 'movies');
+        const anonSnap = await getDocs(anonMoviesRef);
+        if (anonSnap.empty) return;
+
+        // Copy each movie to the Google user's collection (skip if already exists)
+        const googleMoviesRef = collection(db, 'users', googleUid, 'movies');
+        const googleSnap = await getDocs(googleMoviesRef);
+        const existingIds = new Set(googleSnap.docs.map(d => d.id));
+
+        for (const anonDoc of anonSnap.docs) {
+            if (!existingIds.has(anonDoc.id)) {
+                await setDoc(doc(db, 'users', googleUid, 'movies', anonDoc.id), anonDoc.data());
+            }
+        }
+
+        // Clean up orphaned Firestore documents
+        for (const anonDoc of anonSnap.docs) {
+            await deleteDoc(anonDoc.ref);
+        }
+    } catch (err) {
+        console.warn('Merge/cleanup of anonymous data failed:', err);
+    }
+}
+
+async function handleSignOut() {
+    try {
+        await signOut(auth);
+        // Reload so the user sees a clean signed-out state with a fresh anonymous session
+        window.location.reload();
+    } catch (err) {
+        console.error('Sign-out failed:', err);
+    }
+}
+
+function updateAuthUI() {
+    const signInBtn = document.getElementById('btn-google-signin');
+    const userInfo = document.getElementById('user-info');
+    const userName = document.getElementById('user-name');
+    const signOutBtn = document.getElementById('btn-signout');
+
+    if (!signInBtn || !userInfo) return;
+
+    if (currentUser && !currentUser.isAnonymous) {
+        signInBtn.classList.add('hidden');
+        userInfo.classList.remove('hidden');
+        userName.textContent = currentUser.displayName || currentUser.email || 'Signed in';
+    } else {
+        signInBtn.classList.remove('hidden');
+        userInfo.classList.add('hidden');
+    }
 }
 
 // ─── TMDB API ────────────────────────────────────────────────────────
@@ -185,10 +302,14 @@ async function saveDecision(movie, status) {
     });
 }
 
+let unsubDecisions = null;
+
 function listenToDecisions() {
+    // Detach previous listener if switching users
+    if (unsubDecisions) { unsubDecisions(); unsubDecisions = null; }
     if (!currentUser) return;
     const moviesRef = collection(db, 'users', currentUser.uid, 'movies');
-    onSnapshot(moviesRef, (snapshot) => {
+    unsubDecisions = onSnapshot(moviesRef, (snapshot) => {
         userMovies.clear();
         snapshot.forEach((d) => {
             userMovies.set(Number(d.data().tmdbId), d.data());
@@ -1207,6 +1328,10 @@ function groupByTimeframe(movies, now) {
 // ─── Button handlers ─────────────────────────────────────────────────
 btnInterested.addEventListener('click', () => advanceCard('interested'));
 btnDismiss.addEventListener('click', () => advanceCard('dismissed'));
+
+// ─── Google sign-in button ───────────────────────────────────────────
+document.getElementById('btn-google-signin').addEventListener('click', signInWithGoogle);
+document.getElementById('btn-signout').addEventListener('click', handleSignOut);
 
 // ─── Notification permission button ─────────────────────────────────
 const notifBtn = document.getElementById('btn-notifications');
