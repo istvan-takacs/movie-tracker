@@ -7,12 +7,13 @@ Built with vanilla HTML/CSS/JS, Firebase Firestore for persistence, and the TMDB
 ## Features
 
 - **Discover feed** — Swipe through upcoming theatrical and streaming releases as cards
-- **Search** — Find any movie in the TMDB database with debounced search
+- **Search** — Find any movie in the TMDB database; results appear as a swipeable list (Gmail/Outlook-style) where you can swipe right to add or left to dismiss
 - **Source filtering** — Toggle between All, Theatrical, and Streaming releases
 - **Rich movie cards** — Poster, title, release date, TMDB rating, popularity score, genres, director, top 5 cast with photos, expandable plot overview, and trailer link
 - **Watchlist** — Movies you swipe right on, grouped by release timeframe (This Week / This Month / Later / Now Available)
 - **Dismissed archive** — Greyed-out grid of passed movies, with one-tap restore
-- **Release notifications** — Browser notifications when watchlisted movies release
+- **Watchlist & dismissed search** — Filter your watchlist and dismissed lists by title or genre
+- **Background release notifications** — Service worker periodic sync sends notifications even when the app isn't open; falls back to in-app notifications
 - **Offline-ready PWA** — Installable on mobile with service worker caching
 - **Viewport-adaptive layout** — Uses `dvh` units so the card and controls fit any mobile screen without scrolling
 
@@ -33,6 +34,7 @@ movie-tracker/
 ├── index.html            # App shell — 3 views + bottom nav
 ├── style.css             # Cinema-themed styles, mobile-first
 ├── app.js                # TMDB API, Firebase, swipe gestures, views
+├── sw.js                 # Service worker — caching + background notifications
 ├── firebase-config.js    # Firebase project credentials
 ├── manifest.json         # PWA manifest
 └── README.md
@@ -86,7 +88,10 @@ service cloud.firestore {
 |--------|-----|
 | Add to watchlist | Swipe card right, tap ✓, or press → |
 | Dismiss | Swipe card left, tap ✕, or press ← |
-| Search | Type in the search bar (400ms debounce) |
+| Skip for later | Swipe card down |
+| Search movies | Type in the search bar on Discover |
+| Swipe search results | Swipe right to add, left to dismiss |
+| Search watchlist/dismissed | Type in the search bar on those views |
 | Filter source | Tap All / Theatrical / Streaming tabs |
 | Expand overview | Tap "Read more" on the card |
 | Watch trailer | Tap the ▶ Trailer link |

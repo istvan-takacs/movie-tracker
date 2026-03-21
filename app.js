@@ -242,12 +242,10 @@ async function loadMoreMovies() {
 }
 
 function updateDiscoverCounter() {
+    if (isSearchMode) return; // Search mode manages its own counter
     const remaining = currentMovies.length - currentIndex;
-    if (remaining > 0 && !isSearchMode) {
+    if (remaining > 0) {
         discoverCounter.textContent = `${remaining} movie${remaining !== 1 ? 's' : ''} to discover`;
-        discoverCounter.classList.remove('hidden');
-    } else if (isSearchMode) {
-        discoverCounter.textContent = `${remaining} result${remaining !== 1 ? 's' : ''}`;
         discoverCounter.classList.remove('hidden');
     } else {
         discoverCounter.classList.add('hidden');
@@ -401,6 +399,8 @@ function showCurrentCard() {
 }
 
 // ─── Search ──────────────────────────────────────────────────────────
+const searchResults = document.getElementById('search-results');
+
 function setupSearch() {
     searchInput.addEventListener('input', () => {
         const query = searchInput.value.trim();
@@ -415,7 +415,7 @@ function setupSearch() {
 
         searchDebounceTimer = setTimeout(() => {
             enterSearchMode(query);
-        }, 400); // Wait 400ms after typing stops
+        }, 400);
     });
 
     searchClear.addEventListener('click', () => {
@@ -430,17 +430,195 @@ async function enterSearchMode(query) {
     currentMovies = [];
     currentIndex = 0;
 
-    cardStack.innerHTML = '<div class="loading"><div class="spinner"></div><p>Searching…</p></div>';
+    // Hide card stack UI, show search results list
+    cardStack.classList.add('hidden');
+    document.querySelector('.swipe-buttons').classList.add('hidden');
+    document.querySelector('.swipe-hint').classList.add('hidden');
+    searchResults.classList.remove('hidden');
+    searchResults.innerHTML = '<div class="loading"><div class="spinner"></div><p>Searching…</p></div>';
 
     try {
         const results = await searchMovies(query);
-        const undecided = getUndecidedMovies(results);
-        currentMovies = undecided;
+        currentMovies = results;  // Show all results including already-decided
+        renderSearchResults();
     } catch (err) {
         console.error('Search failed:', err);
+        searchResults.innerHTML = '<div class="empty-state"><p>Search failed.</p><p class="hint">Please try again.</p></div>';
+    }
+}
+
+function renderSearchResults() {
+    const undecided = currentMovies.filter(m => !userMovies.has(Number(m.id)));
+
+    if (undecided.length === 0) {
+        searchResults.innerHTML = '<div class="empty-state"><p>No new results found.</p><p class="hint">Try a different search term.</p></div>';
+        discoverCounter.textContent = '0 results';
+        discoverCounter.classList.remove('hidden');
+        return;
     }
 
-    showCurrentCard();
+    discoverCounter.textContent = `${undecided.length} result${undecided.length !== 1 ? 's' : ''}`;
+    discoverCounter.classList.remove('hidden');
+
+    searchResults.innerHTML = '';
+    const hint = document.createElement('p');
+    hint.className = 'search-swipe-hint';
+    hint.textContent = 'Swipe right to add, left to dismiss';
+    searchResults.appendChild(hint);
+
+    undecided.forEach(movie => {
+        const item = createSearchResultItem(movie);
+        searchResults.appendChild(item);
+    });
+}
+
+function createSearchResultItem(movie) {
+    const posterUrl = getImageUrl(movie.poster_path, 'w92');
+    const rating = movie.vote_average ? movie.vote_average.toFixed(1) : '—';
+    const genres = getGenreNames(movie.genre_ids);
+    const releaseFormatted = formatDate(movie.release_date);
+
+    const wrap = document.createElement('div');
+    wrap.className = 'search-result-item-wrap';
+    wrap.dataset.movieId = movie.id;
+
+    // Action panels revealed behind the sliding item (Gmail/Outlook style)
+    const actionRight = document.createElement('div');
+    actionRight.className = 'sr-action sr-action-right';
+    actionRight.innerHTML = '<div class="sr-action-icon">✓<span class="sr-action-label">Watchlist</span></div>';
+
+    const actionLeft = document.createElement('div');
+    actionLeft.className = 'sr-action sr-action-left';
+    actionLeft.innerHTML = '<div class="sr-action-icon">✕<span class="sr-action-label">Dismiss</span></div>';
+
+    wrap.appendChild(actionRight);
+    wrap.appendChild(actionLeft);
+
+    const item = document.createElement('div');
+    item.className = 'search-result-item';
+
+    item.innerHTML = `
+        <div class="sr-content">
+            ${posterUrl
+                ? `<img src="${posterUrl}" alt="${movie.title}" class="sr-poster">`
+                : '<div class="sr-poster sr-no-poster">?</div>'}
+            <div class="sr-info">
+                <h4 class="sr-title">${movie.title}</h4>
+                <p class="sr-date">${releaseFormatted}</p>
+                <div class="sr-meta">
+                    <span class="score-badge rating small">★ ${rating}</span>
+                    ${genres.slice(0, 2).map(g => `<span class="genre-badge small">${g}</span>`).join('')}
+                </div>
+            </div>
+        </div>
+    `;
+
+    wrap.appendChild(item);
+    setupSearchItemSwipe(wrap, item, movie);
+    return wrap;
+}
+
+function setupSearchItemSwipe(wrap, item, movie) {
+    let startX = 0;
+    let deltaX = 0;
+    let isTracking = false;
+    const THRESHOLD = 80;
+    const actionRight = wrap.querySelector('.sr-action-right');
+    const actionLeft = wrap.querySelector('.sr-action-left');
+
+    function onStart(x) {
+        startX = x;
+        deltaX = 0;
+        isTracking = true;
+        item.style.transition = 'none';
+        actionRight.style.opacity = 0;
+        actionLeft.style.opacity = 0;
+    }
+
+    function onMove(x) {
+        if (!isTracking) return;
+        deltaX = x - startX;
+        item.style.transform = `translateX(${deltaX}px)`;
+
+        const progress = Math.min(Math.abs(deltaX) / THRESHOLD, 1);
+        if (deltaX > 0) {
+            // Swiping right → show green "Watchlist" panel on left side
+            actionRight.style.opacity = 0.4 + progress * 0.6;
+            actionLeft.style.opacity = 0;
+        } else {
+            // Swiping left → show red "Dismiss" panel on right side
+            actionLeft.style.opacity = 0.4 + progress * 0.6;
+            actionRight.style.opacity = 0;
+        }
+    }
+
+    function onEnd() {
+        if (!isTracking) return;
+        isTracking = false;
+
+        if (Math.abs(deltaX) > THRESHOLD) {
+            const status = deltaX > 0 ? 'interested' : 'dismissed';
+            const direction = deltaX > 0 ? 1 : -1;
+            item.style.transition = 'transform 0.3s ease, opacity 0.3s ease';
+            item.style.transform = `translateX(${direction * 400}px)`;
+            item.style.opacity = '0';
+
+            saveDecision(movie, status).then(() => {
+                showToast(status === 'interested'
+                    ? `Added "${movie.title}" to watchlist ✓`
+                    : `Dismissed "${movie.title}"`);
+            });
+
+            setTimeout(() => {
+                wrap.style.height = wrap.offsetHeight + 'px';
+                requestAnimationFrame(() => {
+                    wrap.style.transition = 'height 0.25s ease, margin 0.25s ease, padding 0.25s ease';
+                    wrap.style.height = '0';
+                    wrap.style.marginBottom = '0';
+                    wrap.style.overflow = 'hidden';
+                    setTimeout(() => {
+                        wrap.remove();
+                        const remaining = searchResults.querySelectorAll('.search-result-item-wrap').length;
+                        discoverCounter.textContent = `${remaining} result${remaining !== 1 ? 's' : ''}`;
+                        if (remaining === 0) {
+                            searchResults.innerHTML = '<div class="empty-state"><p>All results sorted!</p><p class="hint">Search for more or clear the search.</p></div>';
+                        }
+                    }, 250);
+                });
+            }, 300);
+        } else {
+            item.style.transition = 'transform 0.2s ease';
+            item.style.transform = '';
+            actionRight.style.opacity = 0;
+            actionLeft.style.opacity = 0;
+        }
+    }
+
+    wrap.addEventListener('touchstart', (e) => {
+        if (e.target.closest('a, button')) return;
+        onStart(e.touches[0].clientX);
+    }, { passive: true });
+
+    wrap.addEventListener('touchmove', (e) => {
+        onMove(e.touches[0].clientX);
+        if (isTracking && Math.abs(deltaX) > 10) e.preventDefault();
+    }, { passive: false });
+
+    wrap.addEventListener('touchend', onEnd);
+
+    wrap.addEventListener('mousedown', (e) => {
+        if (e.target.closest('a, button')) return;
+        e.preventDefault();
+        onStart(e.clientX);
+        const mouseMoveHandler = (e2) => onMove(e2.clientX);
+        const mouseUpHandler = () => {
+            onEnd();
+            document.removeEventListener('mousemove', mouseMoveHandler);
+            document.removeEventListener('mouseup', mouseUpHandler);
+        };
+        document.addEventListener('mousemove', mouseMoveHandler);
+        document.addEventListener('mouseup', mouseUpHandler);
+    });
 }
 
 function exitSearchMode() {
@@ -450,7 +628,14 @@ function exitSearchMode() {
     currentIndex = 0;
     loadGeneration++;
     isLoading = false;
-    // Reset page counters and reload
+
+    // Show card stack UI, hide search results
+    searchResults.classList.add('hidden');
+    searchResults.innerHTML = '';
+    cardStack.classList.remove('hidden');
+    document.querySelector('.swipe-buttons').classList.remove('hidden');
+    document.querySelector('.swipe-hint').classList.remove('hidden');
+
     resetPagination();
     loadMoreMovies().then(() => showCurrentCard());
 }
@@ -471,6 +656,11 @@ function setupFilterTabs() {
                 searchInput.value = '';
                 searchClear.classList.add('hidden');
                 isSearchMode = false;
+                searchResults.classList.add('hidden');
+                searchResults.innerHTML = '';
+                cardStack.classList.remove('hidden');
+                document.querySelector('.swipe-buttons').classList.remove('hidden');
+                document.querySelector('.swipe-hint').classList.remove('hidden');
             }
 
             // Reset and reload with new source
@@ -660,17 +850,65 @@ async function advanceCard(status) {
     }
 }
 
+// ─── List search (watchlist / dismissed) ─────────────────────────────
+let watchlistFilter = '';
+let dismissedFilter = '';
+
+function setupListSearch() {
+    const watchlistSearch = document.getElementById('watchlist-search');
+    const watchlistClear = document.getElementById('watchlist-search-clear');
+    const dismissedSearch = document.getElementById('dismissed-search');
+    const dismissedClear = document.getElementById('dismissed-search-clear');
+
+    watchlistSearch.addEventListener('input', () => {
+        watchlistFilter = watchlistSearch.value.trim().toLowerCase();
+        watchlistClear.classList.toggle('hidden', watchlistFilter.length === 0);
+        renderWatchlist();
+    });
+    watchlistClear.addEventListener('click', () => {
+        watchlistSearch.value = '';
+        watchlistFilter = '';
+        watchlistClear.classList.add('hidden');
+        renderWatchlist();
+    });
+
+    dismissedSearch.addEventListener('input', () => {
+        dismissedFilter = dismissedSearch.value.trim().toLowerCase();
+        dismissedClear.classList.toggle('hidden', dismissedFilter.length === 0);
+        renderDismissed();
+    });
+    dismissedClear.addEventListener('click', () => {
+        dismissedSearch.value = '';
+        dismissedFilter = '';
+        dismissedClear.classList.add('hidden');
+        renderDismissed();
+    });
+}
+
+function matchesFilter(movie, filter) {
+    if (!filter) return true;
+    const title = (movie.title || '').toLowerCase();
+    const genres = (movie.genres || []).join(' ').toLowerCase();
+    return title.includes(filter) || genres.includes(filter);
+}
+
 // ─── Watchlist view ──────────────────────────────────────────────────
 function renderWatchlist() {
     const interested = [];
     userMovies.forEach((m) => {
-        if (m.status === 'interested') interested.push(m);
+        if (m.status === 'interested' && matchesFilter(m, watchlistFilter)) interested.push(m);
     });
 
     interested.sort((a, b) => (a.releaseDate || '').localeCompare(b.releaseDate || ''));
 
     if (interested.length === 0) {
-        watchlistContainer.innerHTML = '<div class="empty-state"><p>Your watchlist is empty.</p><p class="hint">Swipe right on movies you want to see!</p></div>';
+        const msg = watchlistFilter
+            ? `No matches for "${watchlistFilter}".`
+            : 'Your watchlist is empty.';
+        const hint = watchlistFilter
+            ? 'Try a different search term.'
+            : 'Swipe right on movies you want to see!';
+        watchlistContainer.innerHTML = `<div class="empty-state"><p>${msg}</p><p class="hint">${hint}</p></div>`;
         return;
     }
 
@@ -728,13 +966,19 @@ function renderWatchlist() {
 function renderDismissed() {
     const dismissed = [];
     userMovies.forEach((m) => {
-        if (m.status === 'dismissed') dismissed.push(m);
+        if (m.status === 'dismissed' && matchesFilter(m, dismissedFilter)) dismissed.push(m);
     });
 
     dismissed.sort((a, b) => (b.decidedAt || '').localeCompare(a.decidedAt || ''));
 
     if (dismissed.length === 0) {
-        dismissedContainer.innerHTML = '<div class="empty-state"><p>No dismissed movies.</p><p class="hint">Movies you pass on will appear here.</p></div>';
+        const msg = dismissedFilter
+            ? `No matches for "${dismissedFilter}".`
+            : 'No dismissed movies.';
+        const hint = dismissedFilter
+            ? 'Try a different search term.'
+            : 'Movies you pass on will appear here.';
+        dismissedContainer.innerHTML = `<div class="empty-state"><p>${msg}</p><p class="hint">${hint}</p></div>`;
         return;
     }
 
@@ -769,37 +1013,63 @@ function renderDismissed() {
 }
 
 // ─── Release notifications ───────────────────────────────────────────
+
+// Persist watchlist to localStorage so the service worker can check
+// release dates in the background (periodic sync / sync events).
+function persistWatchlistForSW() {
+    const interested = [];
+    userMovies.forEach(m => {
+        if (m.status === 'interested') {
+            interested.push({
+                tmdbId: m.tmdbId,
+                title: m.title,
+                releaseDate: m.releaseDate,
+                posterPath: m.posterPath
+            });
+        }
+    });
+    try { localStorage.setItem('mt-watchlist', JSON.stringify(interested)); } catch {}
+}
+
 function checkReleaseNotifications() {
-    // Only check if permission is granted
+    // Persist for background checks regardless of notification permission
+    persistWatchlistForSW();
+
+    // Only show in-app notifications if permission is granted
     if (!('Notification' in window) || Notification.permission !== 'granted') return;
 
-    const today = new Date().toISOString().split('T')[0];
+    const todayStr = new Date().toISOString().split('T')[0];
     const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+
+    // Use localStorage for dedup so notifications survive across sessions
+    // but still allow "tomorrow" → "today" progression
+    let notified = {};
+    try { notified = JSON.parse(localStorage.getItem('mt-notified') || '{}'); } catch {}
 
     userMovies.forEach(m => {
         if (m.status !== 'interested') return;
         if (!m.releaseDate) return;
 
-        // Check if we already notified for this movie (stored in sessionStorage)
-        const notifiedKey = `notified-${m.tmdbId}`;
-        if (sessionStorage.getItem(notifiedKey)) return;
+        const dayKey = `${m.tmdbId}-${todayStr}`;
 
-        if (m.releaseDate === today) {
+        if (m.releaseDate === todayStr && !notified[dayKey]) {
             new Notification('Movie Tracker', {
                 body: `"${m.title}" releases today!`,
                 icon: getImageUrl(m.posterPath, 'w92') || undefined,
-                tag: `release-${m.tmdbId}`
+                tag: `release-${m.tmdbId}-today`
             });
-            sessionStorage.setItem(notifiedKey, '1');
-        } else if (m.releaseDate === tomorrow) {
+            notified[dayKey] = 1;
+        } else if (m.releaseDate === tomorrow && !notified[`${m.tmdbId}-tomorrow-${todayStr}`]) {
             new Notification('Movie Tracker', {
                 body: `"${m.title}" releases tomorrow!`,
                 icon: getImageUrl(m.posterPath, 'w92') || undefined,
-                tag: `release-${m.tmdbId}`
+                tag: `release-${m.tmdbId}-tomorrow`
             });
-            sessionStorage.setItem(notifiedKey, '1');
+            notified[`${m.tmdbId}-tomorrow-${todayStr}`] = 1;
         }
     });
+
+    try { localStorage.setItem('mt-notified', JSON.stringify(notified)); } catch {}
 }
 
 async function requestNotificationPermission() {
@@ -956,13 +1226,27 @@ async function init() {
     switchView('discover');
     setupSearch();
     setupFilterTabs();
+    setupListSearch();
 
-    // Register service worker for PWA support
+    // Register service worker for PWA support + background notifications
     if ('serviceWorker' in navigator) {
         try {
             const swPath = new URL('sw.js', document.baseURI).pathname;
             const registration = await navigator.serviceWorker.register(swPath);
             console.log('✅ Service worker registered:', registration.scope);
+
+            // Register periodic background sync for release notifications
+            // (Chrome/Edge on installed PWAs — ~once per day minimum)
+            if ('periodicSync' in registration) {
+                try {
+                    await registration.periodicSync.register('check-releases', {
+                        minInterval: 12 * 60 * 60 * 1000  // 12 hours
+                    });
+                    console.log('✅ Periodic sync registered for release checks');
+                } catch {
+                    console.log('ℹ️ Periodic sync not available (app may not be installed)');
+                }
+            }
         } catch (error) {
             console.error('❌ Service worker registration failed:', error);
         }

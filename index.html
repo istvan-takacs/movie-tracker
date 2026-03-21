@@ -39,6 +39,11 @@
         </button>
 
         <p id="discover-counter" class="discover-counter hidden"></p>
+
+        <!-- Search results list (shown in search mode) -->
+        <div id="search-results" class="search-results hidden"></div>
+
+        <!-- Card stack (shown in discover mode) -->
         <div id="card-stack"></div>
         <div class="swipe-buttons">
             <button id="btn-dismiss" aria-label="Dismiss">✕</button>
@@ -50,12 +55,20 @@
     <!-- View 2: Watchlist -->
     <section id="view-watchlist" class="view">
         <h2 class="view-title">Watchlist</h2>
+        <div class="search-bar list-search-bar">
+            <input type="text" id="watchlist-search" class="list-search-input" placeholder="Search watchlist…" autocomplete="off">
+            <button id="watchlist-search-clear" class="search-clear hidden" aria-label="Clear search">✕</button>
+        </div>
         <div id="watchlist-container"></div>
     </section>
 
     <!-- View 3: Dismissed -->
     <section id="view-dismissed" class="view">
         <h2 class="view-title">Dismissed</h2>
+        <div class="search-bar list-search-bar">
+            <input type="text" id="dismissed-search" class="list-search-input" placeholder="Search dismissed…" autocomplete="off">
+            <button id="dismissed-search-clear" class="search-clear hidden" aria-label="Clear search">✕</button>
+        </div>
         <div id="dismissed-container"></div>
     </section>
 </main>
