@@ -131,7 +131,9 @@ async function signInWithGoogle() {
                 console.log('[AUTH] fallback signInWithPopup succeeded:', currentUser.uid, currentUser.email);
             }
             await mergeAndCleanupAnonData(anonUid, currentUser.uid);
-            try { if (anonUser && anonUser.isAnonymous) await anonUser.delete(); } catch (_) { /* best effort */ }
+            // Don't call anonUser.delete() — it triggers an internal sign-out
+            // that clears the current Google session. Firebase auto-cleans
+            // inactive anonymous users after 30 days.
             showToast('Signed in as ' + (currentUser.displayName || currentUser.email || 'Google user'));
         } else if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
             // User closed the popup — do nothing
