@@ -63,25 +63,36 @@ const filterTabs = document.querySelectorAll('.filter-tab');
 // ─── Auth ────────────────────────────────────────────────────────────
 const googleProvider = new GoogleAuthProvider();
 
-function ensureAuth() {
-    return new Promise((resolve) => {
-        let resolved = false;
-        onAuthStateChanged(auth, (user) => {
-            if (user) {
-                const prevUid = currentUser ? currentUser.uid : null;
-                currentUser = user;
-                updateAuthUI();
-                // Re-attach Firestore listener if user changed (e.g., anon → Google)
-                if (prevUid && prevUid !== user.uid) {
-                    listenToDecisions();
-                    showCurrentCard();
-                }
-                if (!resolved) { resolved = true; resolve(user); }
-            } else if (!isGoogleSignInProgress) {
-                signInAnonymously(auth);
+async function ensureAuth() {
+    // Wait for Firebase to fully load persisted auth state from IndexedDB.
+    // Without this, onAuthStateChanged can fire with null before the stored
+    // Google session is loaded, causing signInAnonymously to overwrite it.
+    await auth.authStateReady();
+
+    if (!auth.currentUser) {
+        // No persisted session — start anonymous
+        await signInAnonymously(auth);
+    }
+
+    currentUser = auth.currentUser;
+    updateAuthUI();
+
+    // Listen for future auth state changes (e.g., sign-in, sign-out, token refresh)
+    onAuthStateChanged(auth, (user) => {
+        if (user) {
+            const prevUid = currentUser ? currentUser.uid : null;
+            currentUser = user;
+            updateAuthUI();
+            if (prevUid && prevUid !== user.uid) {
+                listenToDecisions();
+                showCurrentCard();
             }
-        });
+        } else if (!isGoogleSignInProgress) {
+            signInAnonymously(auth);
+        }
     });
+
+    return currentUser;
 }
 
 async function signInWithGoogle() {
