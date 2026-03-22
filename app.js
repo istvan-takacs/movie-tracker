@@ -3,7 +3,7 @@ import { firebaseConfig } from './firebase-config.js';
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-app.js";
 import { getFirestore, collection, doc, setDoc, deleteDoc, getDocs, onSnapshot }
     from "https://www.gstatic.com/firebasejs/12.10.0/firebase-firestore.js";
-import { getAuth, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signInWithCredential, linkWithPopup, signOut }
+import { getAuth, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signInWithCredential, linkWithPopup, signOut }
     from "https://www.gstatic.com/firebasejs/12.10.0/firebase-auth.js";
 
 // ─── Firebase init ───────────────────────────────────────────────────
@@ -59,7 +59,19 @@ const filterTabs = document.querySelectorAll('.filter-tab');
 // ─── Auth ────────────────────────────────────────────────────────────
 const googleProvider = new GoogleAuthProvider();
 
-function ensureAuth() {
+async function ensureAuth() {
+    // Check if we're returning from a Google redirect sign-in
+    try {
+        const redirectResult = await getRedirectResult(auth);
+        if (redirectResult && redirectResult.user) {
+            currentUser = redirectResult.user;
+            updateAuthUI();
+            return currentUser;
+        }
+    } catch (err) {
+        console.warn('Redirect sign-in failed:', err);
+    }
+
     return new Promise((resolve) => {
         let resolved = false;
         onAuthStateChanged(auth, (user) => {
@@ -88,12 +100,12 @@ function ensureAuth() {
 async function autoPromptGoogleSignIn() {
     if (!currentUser || !currentUser.isAnonymous) return;
     if (sessionStorage.getItem('mt-signed-out')) return;
-    if (localStorage.getItem('mt-google-prompted')) return;
+    // Only auto-redirect once — use localStorage so we don't redirect-loop
+    if (localStorage.getItem('mt-google-redirected')) return;
 
-    localStorage.setItem('mt-google-prompted', '1');
-    // Small delay so the app renders first before the popup opens
-    await new Promise(r => setTimeout(r, 500));
-    await signInWithGoogle();
+    localStorage.setItem('mt-google-redirected', '1');
+    // Redirect to Google sign-in (no popup needed, no user gesture required)
+    signInWithRedirect(auth, googleProvider);
 }
 
 async function signInWithGoogle() {
@@ -175,9 +187,9 @@ async function mergeAndCleanupAnonData(anonUid, googleUid) {
 
 async function handleSignOut() {
     try {
-        // Flag so the next page load falls back to anonymous instead of prompting Google again
+        // Flag so the next page load falls back to anonymous instead of re-redirecting
         sessionStorage.setItem('mt-signed-out', '1');
-        localStorage.removeItem('mt-google-prompted');
+        localStorage.removeItem('mt-google-redirected');
         await signOut(auth);
         window.location.reload();
     } catch (err) {
