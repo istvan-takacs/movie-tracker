@@ -3,12 +3,16 @@ import { firebaseConfig } from './firebase-config.js';
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-app.js";
 import { getFirestore, collection, doc, setDoc, deleteDoc, getDocs, onSnapshot }
     from "https://www.gstatic.com/firebasejs/12.10.0/firebase-firestore.js";
-import { getAuth, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signInWithCredential, linkWithPopup, signOut }
+import { initializeAuth, browserLocalPersistence, browserPopupRedirectResolver,
+    signInAnonymously, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signInWithCredential, linkWithPopup, signOut }
     from "https://www.gstatic.com/firebasejs/12.10.0/firebase-auth.js";
 
 // ─── Firebase init ───────────────────────────────────────────────────
 const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
+const auth = initializeAuth(app, {
+    persistence: browserLocalPersistence,
+    popupRedirectResolver: browserPopupRedirectResolver,
+});
 const db = getFirestore(app);
 
 // ─── TMDB config ─────────────────────────────────────────────────────
@@ -59,19 +63,7 @@ const filterTabs = document.querySelectorAll('.filter-tab');
 // ─── Auth ────────────────────────────────────────────────────────────
 const googleProvider = new GoogleAuthProvider();
 
-async function ensureAuth() {
-    // Check if we're returning from a Google redirect sign-in
-    try {
-        const redirectResult = await getRedirectResult(auth);
-        if (redirectResult && redirectResult.user) {
-            currentUser = redirectResult.user;
-            updateAuthUI();
-            return currentUser;
-        }
-    } catch (err) {
-        console.warn('Redirect sign-in failed:', err);
-    }
-
+function ensureAuth() {
     return new Promise((resolve) => {
         let resolved = false;
         onAuthStateChanged(auth, (user) => {
@@ -90,22 +82,6 @@ async function ensureAuth() {
             }
         });
     });
-}
-
-/**
- * After the app initialises, prompt Google sign-in if the user is anonymous
- * and hasn't been prompted before. Runs outside onAuthStateChanged to avoid
- * race conditions with Firebase auth state transitions.
- */
-async function autoPromptGoogleSignIn() {
-    if (!currentUser || !currentUser.isAnonymous) return;
-    if (sessionStorage.getItem('mt-signed-out')) return;
-    // Only auto-redirect once — use localStorage so we don't redirect-loop
-    if (localStorage.getItem('mt-google-redirected')) return;
-
-    localStorage.setItem('mt-google-redirected', '1');
-    // Redirect to Google sign-in (no popup needed, no user gesture required)
-    signInWithRedirect(auth, googleProvider);
 }
 
 async function signInWithGoogle() {
@@ -187,9 +163,6 @@ async function mergeAndCleanupAnonData(anonUid, googleUid) {
 
 async function handleSignOut() {
     try {
-        // Flag so the next page load falls back to anonymous instead of re-redirecting
-        sessionStorage.setItem('mt-signed-out', '1');
-        localStorage.removeItem('mt-google-redirected');
         await signOut(auth);
         window.location.reload();
     } catch (err) {
@@ -1414,9 +1387,6 @@ async function init() {
     await loadMoreMovies();
 
     showCurrentCard();
-
-    // After everything is loaded, offer Google sign-in if user is anonymous
-    autoPromptGoogleSignIn();
 }
 
 init();
