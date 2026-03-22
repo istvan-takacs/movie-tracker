@@ -62,7 +62,7 @@ const googleProvider = new GoogleAuthProvider();
 function ensureAuth() {
     return new Promise((resolve) => {
         let resolved = false;
-        onAuthStateChanged(auth, (user) => {
+        onAuthStateChanged(auth, async (user) => {
             if (user) {
                 const prevUid = currentUser ? currentUser.uid : null;
                 currentUser = user;
@@ -70,12 +70,27 @@ function ensureAuth() {
                 // Re-attach Firestore listener if user changed (e.g., anon → Google)
                 if (prevUid && prevUid !== user.uid) {
                     listenToDecisions();
-                    // Re-filter the discover feed for the new user's decisions
                     showCurrentCard();
                 }
                 if (!resolved) { resolved = true; resolve(user); }
             } else if (!isGoogleSignInProgress) {
-                signInAnonymously(auth);
+                // No existing session — try Google first unless user just signed out
+                const justSignedOut = sessionStorage.getItem('mt-signed-out');
+                if (justSignedOut) {
+                    sessionStorage.removeItem('mt-signed-out');
+                    signInAnonymously(auth);
+                } else {
+                    // Attempt silent/auto Google sign-in; fall back to anonymous
+                    isGoogleSignInProgress = true;
+                    try {
+                        await signInWithPopup(auth, googleProvider);
+                    } catch (_) {
+                        // User closed popup or sign-in failed — go anonymous
+                        signInAnonymously(auth);
+                    } finally {
+                        isGoogleSignInProgress = false;
+                    }
+                }
             }
         });
     });
@@ -160,8 +175,9 @@ async function mergeAndCleanupAnonData(anonUid, googleUid) {
 
 async function handleSignOut() {
     try {
+        // Flag so the next page load falls back to anonymous instead of prompting Google again
+        sessionStorage.setItem('mt-signed-out', '1');
         await signOut(auth);
-        // Reload so the user sees a clean signed-out state with a fresh anonymous session
         window.location.reload();
     } catch (err) {
         console.error('Sign-out failed:', err);
