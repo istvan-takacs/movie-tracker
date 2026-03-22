@@ -64,30 +64,33 @@ const filterTabs = document.querySelectorAll('.filter-tab');
 const googleProvider = new GoogleAuthProvider();
 
 async function ensureAuth() {
-    // Wait for Firebase to fully load persisted auth state from IndexedDB.
-    // Without this, onAuthStateChanged can fire with null before the stored
-    // Google session is loaded, causing signInAnonymously to overwrite it.
+    console.log('[AUTH] Waiting for authStateReady...');
     await auth.authStateReady();
+    console.log('[AUTH] Ready. currentUser:', auth.currentUser?.uid, 'isAnon:', auth.currentUser?.isAnonymous, 'email:', auth.currentUser?.email);
 
     if (!auth.currentUser) {
-        // No persisted session — start anonymous
+        console.log('[AUTH] No persisted session, signing in anonymously');
         await signInAnonymously(auth);
     }
 
     currentUser = auth.currentUser;
+    console.log('[AUTH] Resolved as:', currentUser?.uid, 'isAnon:', currentUser?.isAnonymous);
     updateAuthUI();
 
-    // Listen for future auth state changes (e.g., sign-in, sign-out, token refresh)
+    // Listen for future auth state changes
     onAuthStateChanged(auth, (user) => {
+        console.log('[AUTH] onAuthStateChanged:', user?.uid, 'isAnon:', user?.isAnonymous, 'email:', user?.email);
         if (user) {
             const prevUid = currentUser ? currentUser.uid : null;
             currentUser = user;
             updateAuthUI();
             if (prevUid && prevUid !== user.uid) {
+                console.log('[AUTH] UID changed from', prevUid, 'to', user.uid);
                 listenToDecisions();
                 showCurrentCard();
             }
         } else if (!isGoogleSignInProgress) {
+            console.log('[AUTH] onAuthStateChanged null — calling signInAnonymously');
             signInAnonymously(auth);
         }
     });
@@ -96,12 +99,14 @@ async function ensureAuth() {
 }
 
 async function signInWithGoogle() {
+    console.log('[AUTH] signInWithGoogle called. currentUser:', currentUser?.uid, 'isAnon:', currentUser?.isAnonymous);
     isGoogleSignInProgress = true;
     try {
         if (currentUser && currentUser.isAnonymous) {
-            // Link anonymous account to Google — preserves UID and all data
+            console.log('[AUTH] Attempting linkWithPopup...');
             const result = await linkWithPopup(currentUser, googleProvider);
             currentUser = result.user;
+            console.log('[AUTH] linkWithPopup succeeded. New user:', currentUser.uid, 'isAnon:', currentUser.isAnonymous, 'email:', currentUser.email);
             showToast('Signed in — your watchlist is now saved to your Google account');
         } else {
             // Direct sign-in (no anonymous session to link)
@@ -110,23 +115,22 @@ async function signInWithGoogle() {
             showToast('Signed in as ' + (currentUser.displayName || currentUser.email || 'Google user'));
         }
     } catch (err) {
+        console.log('[AUTH] signInWithGoogle error:', err.code);
         if (err.code === 'auth/credential-already-in-use') {
-            // Google account already linked to another UID — sign in with the
-            // existing credential directly (no second popup needed)
             const credential = GoogleAuthProvider.credentialFromError(err);
             const anonUid = currentUser ? currentUser.uid : null;
-            const anonUser = currentUser; // save ref to delete orphaned anon account
+            const anonUser = currentUser;
+            console.log('[AUTH] credential-already-in-use. credential:', !!credential, 'anonUid:', anonUid);
             if (credential) {
                 const result = await signInWithCredential(auth, credential);
                 currentUser = result.user;
+                console.log('[AUTH] signInWithCredential succeeded:', currentUser.uid, currentUser.email);
             } else {
-                // Fallback: open a new popup if credential extraction failed
                 const result = await signInWithPopup(auth, googleProvider);
                 currentUser = result.user;
+                console.log('[AUTH] fallback signInWithPopup succeeded:', currentUser.uid, currentUser.email);
             }
-            // Merge any movies the user added while anonymous into their Google account
             await mergeAndCleanupAnonData(anonUid, currentUser.uid);
-            // Delete the orphaned anonymous Auth user
             try { if (anonUser && anonUser.isAnonymous) await anonUser.delete(); } catch (_) { /* best effort */ }
             showToast('Signed in as ' + (currentUser.displayName || currentUser.email || 'Google user'));
         } else if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
