@@ -72,25 +72,26 @@ function ensureAuth() {
                     listenToDecisions();
                     showCurrentCard();
                 }
-                if (!resolved) { resolved = true; resolve(user); }
-            } else if (!isGoogleSignInProgress) {
-                // No existing session — try Google first unless user just signed out
-                const justSignedOut = sessionStorage.getItem('mt-signed-out');
-                if (justSignedOut) {
-                    sessionStorage.removeItem('mt-signed-out');
-                    signInAnonymously(auth);
-                } else {
-                    // Attempt silent/auto Google sign-in; fall back to anonymous
-                    isGoogleSignInProgress = true;
-                    try {
-                        await signInWithPopup(auth, googleProvider);
-                    } catch (_) {
-                        // User closed popup or sign-in failed — go anonymous
-                        signInAnonymously(auth);
-                    } finally {
-                        isGoogleSignInProgress = false;
+                if (!resolved) {
+                    resolved = true;
+                    resolve(user);
+                    // If user landed as anonymous and hasn't dismissed the prompt before,
+                    // offer Google sign-in automatically
+                    if (user.isAnonymous && !sessionStorage.getItem('mt-signed-out')
+                        && !localStorage.getItem('mt-google-prompted')) {
+                        localStorage.setItem('mt-google-prompted', '1');
+                        isGoogleSignInProgress = true;
+                        try {
+                            await signInWithPopup(auth, googleProvider);
+                        } catch (_) {
+                            // User closed popup — stay anonymous
+                        } finally {
+                            isGoogleSignInProgress = false;
+                        }
                     }
                 }
+            } else if (!isGoogleSignInProgress) {
+                signInAnonymously(auth);
             }
         });
     });
@@ -177,6 +178,7 @@ async function handleSignOut() {
     try {
         // Flag so the next page load falls back to anonymous instead of prompting Google again
         sessionStorage.setItem('mt-signed-out', '1');
+        localStorage.removeItem('mt-google-prompted');
         await signOut(auth);
         window.location.reload();
     } catch (err) {
