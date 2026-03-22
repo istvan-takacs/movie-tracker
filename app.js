@@ -62,7 +62,7 @@ const googleProvider = new GoogleAuthProvider();
 function ensureAuth() {
     return new Promise((resolve) => {
         let resolved = false;
-        onAuthStateChanged(auth, async (user) => {
+        onAuthStateChanged(auth, (user) => {
             if (user) {
                 const prevUid = currentUser ? currentUser.uid : null;
                 currentUser = user;
@@ -72,29 +72,28 @@ function ensureAuth() {
                     listenToDecisions();
                     showCurrentCard();
                 }
-                if (!resolved) {
-                    resolved = true;
-                    resolve(user);
-                    // If user landed as anonymous and hasn't dismissed the prompt before,
-                    // offer Google sign-in automatically
-                    if (user.isAnonymous && !sessionStorage.getItem('mt-signed-out')
-                        && !localStorage.getItem('mt-google-prompted')) {
-                        localStorage.setItem('mt-google-prompted', '1');
-                        isGoogleSignInProgress = true;
-                        try {
-                            await signInWithPopup(auth, googleProvider);
-                        } catch (_) {
-                            // User closed popup — stay anonymous
-                        } finally {
-                            isGoogleSignInProgress = false;
-                        }
-                    }
-                }
+                if (!resolved) { resolved = true; resolve(user); }
             } else if (!isGoogleSignInProgress) {
                 signInAnonymously(auth);
             }
         });
     });
+}
+
+/**
+ * After the app initialises, prompt Google sign-in if the user is anonymous
+ * and hasn't been prompted before. Runs outside onAuthStateChanged to avoid
+ * race conditions with Firebase auth state transitions.
+ */
+async function autoPromptGoogleSignIn() {
+    if (!currentUser || !currentUser.isAnonymous) return;
+    if (sessionStorage.getItem('mt-signed-out')) return;
+    if (localStorage.getItem('mt-google-prompted')) return;
+
+    localStorage.setItem('mt-google-prompted', '1');
+    // Small delay so the app renders first before the popup opens
+    await new Promise(r => setTimeout(r, 500));
+    await signInWithGoogle();
 }
 
 async function signInWithGoogle() {
@@ -1403,6 +1402,9 @@ async function init() {
     await loadMoreMovies();
 
     showCurrentCard();
+
+    // After everything is loaded, offer Google sign-in if user is anonymous
+    autoPromptGoogleSignIn();
 }
 
 init();
