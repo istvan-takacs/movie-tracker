@@ -8,9 +8,11 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Movies">
     <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
     <title>Movie Tracker</title>
     <link rel="stylesheet" href="style.css">
     <link rel="manifest" href="manifest.json">
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
 <header>
@@ -48,6 +50,17 @@
             <button class="filter-tab" data-source="streaming">Streaming</button>
         </div>
 
+        <!-- Sort dropdown -->
+        <div class="sort-row">
+            <label for="sort-select" class="sort-label">Sort:</label>
+            <select id="sort-select" class="sort-select">
+                <option value="relevance">Relevance</option>
+                <option value="release-date">Release Date</option>
+                <option value="rating">Rating</option>
+                <option value="popularity">Popularity</option>
+            </select>
+        </div>
+
         <!-- Notification prompt -->
         <button id="btn-notifications" class="notification-prompt">
             🔔 Enable release notifications
@@ -77,7 +90,17 @@
         <div id="watchlist-container"></div>
     </section>
 
-    <!-- View 3: Dismissed -->
+    <!-- View 3: Seen -->
+    <section id="view-seen" class="view">
+        <h2 class="view-title">Seen</h2>
+        <div class="search-bar list-search-bar">
+            <input type="text" id="seen-search" class="list-search-input" placeholder="Search seen…" autocomplete="off">
+            <button id="seen-search-clear" class="search-clear hidden" aria-label="Clear search">✕</button>
+        </div>
+        <div id="seen-container"></div>
+    </section>
+
+    <!-- View 4: Dismissed -->
     <section id="view-dismissed" class="view">
         <h2 class="view-title">Dismissed</h2>
         <div class="search-bar list-search-bar">
@@ -88,6 +111,28 @@
     </section>
 </main>
 
+<!-- Movie detail overlay -->
+<div id="movie-detail" class="detail-overlay hidden">
+    <div class="detail-scroll">
+        <button class="detail-back" id="detail-back">← Back</button>
+        <div id="detail-content"></div>
+    </div>
+</div>
+
+<!-- Rating modal -->
+<div id="rating-modal" class="modal-overlay hidden">
+    <div class="modal-content">
+        <h3 class="modal-title">Mark as Seen</h3>
+        <p class="modal-movie-title" id="rating-modal-title"></p>
+        <p class="modal-label">Your Rating</p>
+        <div class="rating-buttons" id="rating-buttons"></div>
+        <div class="modal-actions">
+            <button class="modal-btn modal-btn-cancel" id="rating-cancel">Cancel</button>
+            <button class="modal-btn modal-btn-save" id="rating-save">Save</button>
+        </div>
+    </div>
+</div>
+
 <!-- Toast notification -->
 <div id="toast" class="toast"></div>
 
@@ -96,6 +141,10 @@
     <button data-view="watchlist">
         Watchlist
         <span id="badge-watchlist" class="tab-badge hidden">0</span>
+    </button>
+    <button data-view="seen">
+        Seen
+        <span id="badge-seen" class="tab-badge hidden">0</span>
     </button>
     <button data-view="dismissed">
         Dismissed

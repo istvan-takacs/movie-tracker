@@ -1,5 +1,5 @@
 // ─── Firebase imports ────────────────────────────────────────────────
-import { firebaseConfig } from './firebase-config.js';
+import { firebaseConfig, googleClientId } from './firebase-config.js';
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-app.js";
 import { getFirestore, collection, doc, setDoc, deleteDoc, getDocs, onSnapshot }
     from "https://www.gstatic.com/firebasejs/12.10.0/firebase-firestore.js";
@@ -35,7 +35,10 @@ let loadGeneration = 0;           // incremented on filter/search change to canc
 let isSwiping = false;
 let trailerCache = new Map();     // tmdbId → YouTube URL (or null)
 let castCache = new Map();        // tmdbId → [ { name, character, profilePath }, ... ]
+let providerCache = new Map();    // tmdbId → [ { name, logoPath }, ... ] or []
+let detailCache = new Map();      // tmdbId → full TMDB movie object
 let activeSource = 'all';         // 'all', 'theatrical', 'streaming'
+let activeSortBy = localStorage.getItem('mt-sort') || 'relevance';
 let isSearchMode = false;
 let searchDebounceTimer = null;
 let isGoogleSignInProgress = false; // guard against onAuthStateChanged re-triggering anon sign-in
@@ -50,6 +53,7 @@ let streamingTotalPages = Infinity;
 // ─── DOM refs ────────────────────────────────────────────────────────
 const cardStack = document.getElementById('card-stack');
 const watchlistContainer = document.getElementById('watchlist-container');
+const seenContainer = document.getElementById('seen-container');
 const dismissedContainer = document.getElementById('dismissed-container');
 const btnInterested = document.getElementById('btn-interested');
 const btnDismiss = document.getElementById('btn-dismiss');
@@ -201,6 +205,56 @@ function updateAuthUI() {
     }
 }
 
+/**
+ * Try Google One Tap auto sign-in. Shows a small prompt in the corner
+ * without requiring a user gesture. Falls back silently if GIS library
+ * isn't loaded or client ID isn't configured.
+ */
+function tryGoogleOneTap() {
+    if (!googleClientId || !window.google?.accounts?.id) return;
+    if (currentUser && !currentUser.isAnonymous) return; // already signed in
+
+    google.accounts.id.initialize({
+        client_id: googleClientId,
+        callback: handleOneTapResponse,
+        auto_select: true,       // auto-sign-in for returning users
+        cancel_on_tap_outside: true,
+    });
+    google.accounts.id.prompt();
+}
+
+async function handleOneTapResponse(response) {
+    if (!response.credential) return;
+    isGoogleSignInProgress = true;
+    try {
+        // Capture anonymous data before switching
+        let anonMovies = [];
+        if (currentUser && currentUser.isAnonymous) {
+            try {
+                const snap = await getDocs(collection(db, 'users', currentUser.uid, 'movies'));
+                anonMovies = snap.docs.map(d => ({ id: d.id, data: d.data() }));
+            } catch (_) { /* best effort */ }
+            if (unsubDecisions) { unsubDecisions(); unsubDecisions = null; }
+        }
+
+        const credential = GoogleAuthProvider.credential(response.credential);
+        const result = await signInWithCredential(auth, credential);
+        currentUser = result.user;
+
+        if (anonMovies.length) {
+            await mergeAnonMovies(anonMovies, currentUser.uid);
+        }
+
+        updateAuthUI();
+        showToast('Signed in as ' + (currentUser.displayName || currentUser.email || 'Google user'));
+    } catch (err) {
+        console.warn('One Tap sign-in failed:', err);
+        listenToDecisions(); // re-attach if it was detached
+    } finally {
+        isGoogleSignInProgress = false;
+    }
+}
+
 // ─── TMDB API ────────────────────────────────────────────────────────
 async function fetchGenres() {
     const url = `${TMDB_BASE}/genre/movie/list?api_key=${TMDB_API_KEY}&language=en-US`;
@@ -237,6 +291,40 @@ async function searchMovies(query, page = 1) {
     const res = await fetch(url);
     const data = await res.json();
     return (data.results || []).map(m => ({ ...m, _source: 'search' }));
+}
+
+async function fetchMovieDetails(tmdbId) {
+    if (detailCache.has(tmdbId)) return detailCache.get(tmdbId);
+    try {
+        const url = `${TMDB_BASE}/movie/${tmdbId}?api_key=${TMDB_API_KEY}&language=en-US`;
+        const res = await fetch(url);
+        const data = await res.json();
+        detailCache.set(tmdbId, data);
+        return data;
+    } catch {
+        return null;
+    }
+}
+
+async function fetchWatchProviders(tmdbId) {
+    if (providerCache.has(tmdbId)) return providerCache.get(tmdbId);
+    try {
+        const url = `${TMDB_BASE}/movie/${tmdbId}/watch/providers?api_key=${TMDB_API_KEY}`;
+        const res = await fetch(url);
+        const data = await res.json();
+        // Use US providers; fall back to empty
+        const us = data.results?.US || {};
+        const flatrate = (us.flatrate || []).map(p => ({
+            id: p.provider_id,
+            name: p.provider_name,
+            logoPath: p.logo_path,
+        }));
+        providerCache.set(tmdbId, flatrate);
+        return flatrate;
+    } catch {
+        providerCache.set(tmdbId, []);
+        return [];
+    }
 }
 
 async function fetchTrailer(tmdbId) {
@@ -330,6 +418,7 @@ function listenToDecisions() {
             userMovies.set(Number(d.data().tmdbId), d.data());
         });
         renderWatchlist();
+        renderSeen();
         renderDismissed();
         updateTabBadges();
         checkReleaseNotifications();
@@ -339,6 +428,50 @@ function listenToDecisions() {
 // ─── Discover feed ───────────────────────────────────────────────────
 function getUndecidedMovies(movies) {
     return movies.filter(m => !userMovies.has(Number(m.id)));
+}
+
+function calculateHypeScore(movie) {
+    const popularity = movie.popularity || 0;
+    const voteCount = movie.vote_count || 0;
+
+    // Recency bonus: movies releasing within 30 days score higher
+    let recencyBonus = 50; // default for movies with no date or far out
+    if (movie.release_date) {
+        const now = Date.now();
+        const release = new Date(movie.release_date).getTime();
+        const daysUntil = (release - now) / 86400000;
+        if (daysUntil <= 0) recencyBonus = 100;       // already released
+        else if (daysUntil <= 30) recencyBonus = 100 - (daysUntil / 30) * 100;
+        else recencyBonus = 0;
+    }
+
+    // Normalize: popularity typically 0–500+, voteCount 0–10000+
+    return (Math.min(popularity, 500) / 500) * 40
+         + (recencyBonus / 100) * 40
+         + (Math.min(voteCount, 5000) / 5000) * 20;
+}
+
+function sortDiscoverMovies(movies, sortBy) {
+    const sorted = [...movies];
+    switch (sortBy) {
+        case 'relevance':
+            sorted.sort((a, b) => calculateHypeScore(b) - calculateHypeScore(a));
+            break;
+        case 'release-date':
+            sorted.sort((a, b) => {
+                const da = a.release_date || '9999';
+                const db = b.release_date || '9999';
+                return da.localeCompare(db);
+            });
+            break;
+        case 'rating':
+            sorted.sort((a, b) => (b.vote_average || 0) - (a.vote_average || 0));
+            break;
+        case 'popularity':
+            sorted.sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
+            break;
+    }
+    return sorted;
 }
 
 async function loadMoreMovies() {
@@ -371,6 +504,11 @@ async function loadMoreMovies() {
 
         const undecided = getUndecidedMovies(newMovies);
         currentMovies.push(...undecided);
+
+        // Sort remaining unseen movies (preserve already-viewed order)
+        const seen = currentMovies.slice(0, currentIndex);
+        const unseen = currentMovies.slice(currentIndex);
+        currentMovies = [...seen, ...sortDiscoverMovies(unseen, activeSortBy)];
     } catch (err) {
         console.error('Failed to fetch movies:', err);
     }
@@ -452,6 +590,7 @@ function showCurrentCard() {
             ${genres.length > 0
                 ? `<div class="genre-badges">${genres.map(g => `<span class="genre-badge">${g}</span>`).join('')}</div>`
                 : ''}
+            <div class="provider-row" id="provider-row-${movie.id}"></div>
             <p class="director-line" id="director-line-${movie.id}"></p>
             <div class="cast-row" id="cast-row-${movie.id}">
                 <span class="cast-loading">Loading cast…</span>
@@ -515,6 +654,15 @@ function showCurrentCard() {
         }).join('');
     });
 
+    // Fetch streaming providers async
+    fetchWatchProviders(movie.id).then(providers => {
+        const provRow = document.getElementById(`provider-row-${movie.id}`);
+        if (!provRow || providers.length === 0) return;
+        provRow.innerHTML = providers.slice(0, 5).map(p =>
+            `<img src="https://image.tmdb.org/t/p/original${p.logoPath}" alt="${p.name}" title="${p.name}" class="provider-logo">`
+        ).join('');
+    });
+
     // Fetch trailer async
     fetchTrailer(movie.id).then(ytUrl => {
         const link = document.getElementById(`trailer-link-${movie.id}`);
@@ -532,7 +680,189 @@ function showCurrentCard() {
     });
 
     setupSwipeHandlers(card);
+
+    // Tap on card poster opens detail (only if no swipe occurred)
+    let cardTapStart = null;
+    card.addEventListener('pointerdown', (e) => {
+        if (e.target.closest('.cast-row, .genre-badges, a, button, .overview, .card-actions')) return;
+        cardTapStart = { x: e.clientX, y: e.clientY, time: Date.now() };
+    });
+    card.addEventListener('pointerup', (e) => {
+        if (!cardTapStart) return;
+        const dx = Math.abs(e.clientX - cardTapStart.x);
+        const dy = Math.abs(e.clientY - cardTapStart.y);
+        const dt = Date.now() - cardTapStart.time;
+        cardTapStart = null;
+        // Tap: minimal movement and quick
+        if (dx < 10 && dy < 10 && dt < 300) {
+            openDetail(movie.id);
+        }
+    });
+
+    // Prevent cast-row touch events from triggering card swipe
+    const castRowEl = card.querySelector('.cast-row');
+    if (castRowEl) {
+        castRowEl.addEventListener('touchstart', (e) => e.stopPropagation(), { passive: true });
+        castRowEl.addEventListener('touchmove', (e) => e.stopPropagation(), { passive: true });
+    }
 }
+
+// ─── Movie detail overlay ───────────────────────────────────────────
+async function openDetail(tmdbId) {
+    const overlay = document.getElementById('movie-detail');
+    const content = document.getElementById('detail-content');
+    content.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading…</p></div>';
+    overlay.classList.remove('hidden');
+    history.pushState({ detail: true }, '');
+
+    // Fetch full details, credits, providers, and trailer in parallel
+    const [details, credits, providers, trailerUrl] = await Promise.all([
+        fetchMovieDetails(tmdbId),
+        fetchCredits(tmdbId),
+        fetchWatchProviders(tmdbId),
+        fetchTrailer(tmdbId),
+    ]);
+
+    if (!details) {
+        content.innerHTML = '<div class="empty-state"><p>Could not load movie details.</p></div>';
+        return;
+    }
+
+    const posterUrl = getImageUrl(details.poster_path);
+    const genres = (details.genres || []).map(g => g.name);
+    const rating = details.vote_average ? details.vote_average.toFixed(1) : '—';
+    const popularity = details.popularity ? Math.round(details.popularity) : 0;
+    const runtime = details.runtime ? `${Math.floor(details.runtime / 60)}h ${details.runtime % 60}m` : '';
+    const releaseFormatted = formatDate(details.release_date);
+    const directors = credits.directors || [];
+    const cast = credits.cast || [];
+    const overview = details.overview || 'No overview available.';
+
+    // Determine movie status for action buttons
+    const movieData = userMovies.get(Number(tmdbId));
+    const status = movieData ? movieData.status : null;
+
+    let actionsHtml = '';
+    if (status === 'interested') {
+        actionsHtml = `
+            <button class="detail-action-btn detail-btn-seen" data-tmdb-id="${tmdbId}">✓ Mark as Seen</button>
+            <button class="detail-action-btn detail-btn-dismiss" data-tmdb-id="${tmdbId}">✕ Remove</button>`;
+    } else if (status === 'seen') {
+        actionsHtml = `<p class="detail-seen-info">You rated this ★ ${movieData.rating}/10</p>`;
+    } else if (status === 'dismissed') {
+        actionsHtml = `<button class="detail-action-btn detail-btn-restore" data-tmdb-id="${tmdbId}">↩ Restore to Watchlist</button>`;
+    } else {
+        actionsHtml = `
+            <button class="detail-action-btn detail-btn-add" data-tmdb-id="${tmdbId}">✓ Add to Watchlist</button>
+            <button class="detail-action-btn detail-btn-dismiss" data-tmdb-id="${tmdbId}">✕ Dismiss</button>`;
+    }
+
+    content.innerHTML = `
+        ${posterUrl ? `<img src="${posterUrl}" alt="${details.title}" class="detail-poster">` : ''}
+        <div class="detail-info">
+            <h2 class="detail-title">${details.title} ${details.release_date ? `<span class="detail-year">(${details.release_date.slice(0, 4)})</span>` : ''}</h2>
+            <div class="detail-meta">
+                <span class="score-badge rating">★ ${rating}</span>
+                <span class="score-badge popularity">🔥 ${popularity}</span>
+                ${runtime ? `<span class="detail-runtime">${runtime}</span>` : ''}
+            </div>
+            <p class="release-date">${releaseFormatted}</p>
+            ${genres.length ? `<div class="genre-badges">${genres.map(g => `<span class="genre-badge">${g}</span>`).join('')}</div>` : ''}
+            ${directors.length ? `<p class="director-line">🎬 <span class="director-label">Directed by</span> ${directors.join(', ')}</p>` : ''}
+            ${providers.length ? `
+                <div class="detail-section">
+                    <h4 class="detail-section-title">Available On</h4>
+                    <div class="detail-providers">
+                        ${providers.map(p => `
+                            <div class="detail-provider">
+                                <img src="https://image.tmdb.org/t/p/original${p.logoPath}" alt="${p.name}" class="provider-logo">
+                                <span class="detail-provider-name">${p.name}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            ` : ''}
+            <div class="detail-section">
+                <h4 class="detail-section-title">Overview</h4>
+                <p class="detail-overview">${overview}</p>
+            </div>
+            ${cast.length ? `
+                <div class="detail-section">
+                    <h4 class="detail-section-title">Cast</h4>
+                    <div class="detail-cast">
+                        ${cast.map(c => {
+                            const photo = c.profilePath
+                                ? `<img src="${getImageUrl(c.profilePath, 'w185')}" alt="${c.name}" class="detail-cast-photo">`
+                                : '<div class="detail-cast-photo cast-no-photo">?</div>';
+                            return `<div class="detail-cast-member">
+                                ${photo}
+                                <div>
+                                    <span class="cast-name">${c.name}</span>
+                                    <span class="cast-character">${c.character || ''}</span>
+                                </div>
+                            </div>`;
+                        }).join('')}
+                    </div>
+                </div>
+            ` : ''}
+            ${trailerUrl ? `<a class="detail-trailer-btn" href="${trailerUrl}" target="_blank" rel="noopener">▶ Watch Trailer</a>` : ''}
+            <div class="detail-actions">${actionsHtml}</div>
+        </div>
+    `;
+
+    // Wire up action buttons
+    const addBtn = content.querySelector('.detail-btn-add');
+    if (addBtn) addBtn.addEventListener('click', () => {
+        const movie = currentMovies.find(m => m.id === Number(tmdbId)) || details;
+        saveDecision(movie, 'interested');
+        closeDetail();
+    });
+    const dismissBtn = content.querySelector('.detail-btn-dismiss');
+    if (dismissBtn) dismissBtn.addEventListener('click', async () => {
+        if (movieData) {
+            const movieRef = doc(db, 'users', currentUser.uid, 'movies', String(tmdbId));
+            await setDoc(movieRef, { ...movieData, status: 'dismissed', decidedAt: new Date().toISOString() });
+            showToast(`Moved "${details.title}" to dismissed`);
+        } else {
+            const movie = currentMovies.find(m => m.id === Number(tmdbId)) || details;
+            saveDecision(movie, 'dismissed');
+        }
+        closeDetail();
+    });
+    const seenBtn = content.querySelector('.detail-btn-seen');
+    if (seenBtn) seenBtn.addEventListener('click', () => {
+        openRatingModal(Number(tmdbId));
+        closeDetail();
+    });
+    const restoreBtn = content.querySelector('.detail-btn-restore');
+    if (restoreBtn) restoreBtn.addEventListener('click', async () => {
+        if (movieData) {
+            const movieRef = doc(db, 'users', currentUser.uid, 'movies', String(tmdbId));
+            await setDoc(movieRef, { ...movieData, status: 'interested', decidedAt: new Date().toISOString() });
+            showToast(`Restored "${details.title}" to watchlist ✓`);
+        }
+        closeDetail();
+    });
+}
+
+function closeDetail() {
+    const overlay = document.getElementById('movie-detail');
+    if (overlay.classList.contains('hidden')) return;
+    overlay.classList.add('hidden');
+    if (history.state && history.state.detail) {
+        history.back();
+    }
+}
+
+document.getElementById('detail-back').addEventListener('click', closeDetail);
+
+// Browser back button closes detail overlay
+window.addEventListener('popstate', () => {
+    const overlay = document.getElementById('movie-detail');
+    if (!overlay.classList.contains('hidden')) {
+        overlay.classList.add('hidden');
+    }
+});
 
 // ─── Search ──────────────────────────────────────────────────────────
 const searchResults = document.getElementById('search-results');
@@ -812,6 +1142,21 @@ function setupFilterTabs() {
     });
 }
 
+function setupSortSelect() {
+    const sortSelect = document.getElementById('sort-select');
+    if (!sortSelect) return;
+    sortSelect.value = activeSortBy;
+    sortSelect.addEventListener('change', () => {
+        activeSortBy = sortSelect.value;
+        localStorage.setItem('mt-sort', activeSortBy);
+
+        // Re-sort unseen movies and reset to first unseen card
+        const unseen = currentMovies.slice(currentIndex);
+        currentMovies = [...currentMovies.slice(0, currentIndex), ...sortDiscoverMovies(unseen, activeSortBy)];
+        showCurrentCard();
+    });
+}
+
 function resetPagination() {
     theatricalPage = 1;
     theatricalTotalPages = Infinity;
@@ -923,7 +1268,7 @@ function setupSwipeHandlers(card) {
     card.addEventListener('touchmove', (e) => {
         const t = e.touches[0];
         onMove(t.clientX, t.clientY);
-        if (direction) e.preventDefault();
+        if (direction && e.cancelable) e.preventDefault();
     }, { passive: false });
 
     card.addEventListener('touchend', onEnd);
@@ -989,6 +1334,7 @@ async function advanceCard(status) {
 // ─── List search (watchlist / dismissed) ─────────────────────────────
 let watchlistFilter = '';
 let dismissedFilter = '';
+let seenFilter = '';
 
 function setupListSearch() {
     const watchlistSearch = document.getElementById('watchlist-search');
@@ -1018,6 +1364,20 @@ function setupListSearch() {
         dismissedFilter = '';
         dismissedClear.classList.add('hidden');
         renderDismissed();
+    });
+
+    const seenSearch = document.getElementById('seen-search');
+    const seenClear = document.getElementById('seen-search-clear');
+    seenSearch.addEventListener('input', () => {
+        seenFilter = seenSearch.value.trim().toLowerCase();
+        seenClear.classList.toggle('hidden', seenFilter.length === 0);
+        renderSeen();
+    });
+    seenClear.addEventListener('click', () => {
+        seenSearch.value = '';
+        seenFilter = '';
+        seenClear.classList.add('hidden');
+        renderSeen();
     });
 }
 
@@ -1076,7 +1436,10 @@ function renderWatchlist() {
                             ${(m.genres || []).slice(0, 2).map(g => `<span class="genre-badge small">${g}</span>`).join('')}
                         </div>
                     </div>
-                    <button class="btn-remove" title="Dismiss" data-action="dismiss" data-tmdb-id="${m.tmdbId}">✕</button>
+                    <div class="watchlist-actions">
+                        <button class="btn-seen" title="Mark as seen" data-tmdb-id="${m.tmdbId}">✓</button>
+                        <button class="btn-remove" title="Dismiss" data-action="dismiss" data-tmdb-id="${m.tmdbId}">✕</button>
+                    </div>
                 </div>
             `;
         });
@@ -1095,6 +1458,21 @@ function renderWatchlist() {
                 showToast(`Moved "${movie.title}" to dismissed`);
             }
         });
+    });
+
+    watchlistContainer.querySelectorAll('.btn-seen').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const id = Number(btn.dataset.tmdbId);
+            openRatingModal(id);
+        });
+    });
+
+    watchlistContainer.querySelectorAll('.watchlist-item').forEach(item => {
+        item.addEventListener('click', () => {
+            openDetail(Number(item.dataset.tmdbId));
+        });
+        item.style.cursor = 'pointer';
     });
 }
 
@@ -1146,7 +1524,132 @@ function renderDismissed() {
             }
         });
     });
+
+    dismissedContainer.querySelectorAll('.dismissed-item').forEach(item => {
+        item.addEventListener('click', () => {
+            openDetail(Number(item.dataset.tmdbId));
+        });
+        item.style.cursor = 'pointer';
+    });
 }
+
+// ─── Seen view ──────────────────────────────────────────────────────
+function renderSeen() {
+    const seen = [];
+    userMovies.forEach((m) => {
+        if (m.status === 'seen' && matchesFilter(m, seenFilter)) seen.push(m);
+    });
+
+    seen.sort((a, b) => (b.seenAt || '').localeCompare(a.seenAt || ''));
+
+    if (seen.length === 0) {
+        const msg = seenFilter
+            ? `No matches for "${seenFilter}".`
+            : 'No seen movies yet.';
+        const hint = seenFilter
+            ? 'Try a different search term.'
+            : 'Mark movies as seen from your watchlist!';
+        seenContainer.innerHTML = `<div class="empty-state"><p>${msg}</p><p class="hint">${hint}</p></div>`;
+        return;
+    }
+
+    let html = '';
+    seen.forEach(m => {
+        const posterUrl = getImageUrl(m.posterPath, 'w185');
+        const releaseFormatted = formatDate(m.releaseDate);
+        const seenDate = m.seenAt ? formatDate(m.seenAt.split('T')[0]) : '';
+        const userRating = m.rating || '—';
+
+        html += `
+            <div class="watchlist-item seen-item" data-tmdb-id="${m.tmdbId}">
+                ${posterUrl
+                    ? `<img src="${posterUrl}" alt="${m.title}" class="watchlist-poster">`
+                    : '<div class="watchlist-poster no-poster-sm">?</div>'}
+                <div class="watchlist-info">
+                    <h4>${m.title}</h4>
+                    <p class="release-date">${releaseFormatted}</p>
+                    <div class="watchlist-meta">
+                        ${(m.genres || []).slice(0, 2).map(g => `<span class="genre-badge small">${g}</span>`).join('')}
+                    </div>
+                    <p class="seen-date">Seen ${seenDate}</p>
+                </div>
+                <div class="seen-rating" title="Your rating">
+                    <span class="seen-rating-number">${userRating}</span>
+                    <span class="seen-rating-label">/10</span>
+                </div>
+            </div>
+        `;
+    });
+
+    seenContainer.innerHTML = html;
+
+    seenContainer.querySelectorAll('.seen-item').forEach(item => {
+        item.addEventListener('click', () => {
+            openDetail(Number(item.dataset.tmdbId));
+        });
+        item.style.cursor = 'pointer';
+    });
+}
+
+// ─── Rating modal ───────────────────────────────────────────────────
+let ratingModalMovieId = null;
+let ratingModalValue = null;
+
+function openRatingModal(tmdbId) {
+    ratingModalMovieId = tmdbId;
+    ratingModalValue = null;
+    const movie = userMovies.get(tmdbId);
+    if (!movie) return;
+
+    document.getElementById('rating-modal-title').textContent = movie.title;
+
+    const buttonsContainer = document.getElementById('rating-buttons');
+    buttonsContainer.innerHTML = '';
+    for (let i = 1; i <= 10; i++) {
+        const btn = document.createElement('button');
+        btn.className = 'rating-btn';
+        btn.textContent = i;
+        btn.addEventListener('click', () => {
+            ratingModalValue = i;
+            buttonsContainer.querySelectorAll('.rating-btn').forEach(b => b.classList.remove('selected'));
+            btn.classList.add('selected');
+        });
+        buttonsContainer.appendChild(btn);
+    }
+
+    document.getElementById('rating-modal').classList.remove('hidden');
+}
+
+function closeRatingModal() {
+    document.getElementById('rating-modal').classList.add('hidden');
+    ratingModalMovieId = null;
+    ratingModalValue = null;
+}
+
+document.getElementById('rating-cancel').addEventListener('click', closeRatingModal);
+document.getElementById('rating-save').addEventListener('click', async () => {
+    if (ratingModalMovieId === null || ratingModalValue === null) {
+        showToast('Please select a rating');
+        return;
+    }
+    const movie = userMovies.get(ratingModalMovieId);
+    if (movie) {
+        const movieRef = doc(db, 'users', currentUser.uid, 'movies', String(ratingModalMovieId));
+        await setDoc(movieRef, {
+            ...movie,
+            status: 'seen',
+            rating: ratingModalValue,
+            seenAt: new Date().toISOString(),
+        });
+        showToast(`Rated "${movie.title}" ${ratingModalValue}/10 ★`);
+    }
+    closeRatingModal();
+});
+
+// Close modal on overlay click
+document.getElementById('rating-modal').addEventListener('click', (e) => {
+    if (e.target.id === 'rating-modal') closeRatingModal();
+});
 
 // ─── Release notifications ───────────────────────────────────────────
 
@@ -1234,28 +1737,26 @@ bottomTabs.forEach(btn => {
 // ─── Tab badges ──────────────────────────────────────────────────────
 function updateTabBadges() {
     let watchCount = 0;
+    let seenCount = 0;
     let dismissCount = 0;
     userMovies.forEach(m => {
         if (m.status === 'interested') watchCount++;
+        else if (m.status === 'seen') seenCount++;
         else if (m.status === 'dismissed') dismissCount++;
     });
 
     const watchBadge = document.getElementById('badge-watchlist');
+    const seenBadge = document.getElementById('badge-seen');
     const dismissBadge = document.getElementById('badge-dismissed');
 
-    if (watchCount > 0) {
-        watchBadge.textContent = watchCount;
-        watchBadge.classList.remove('hidden');
-    } else {
-        watchBadge.classList.add('hidden');
-    }
+    if (watchCount > 0) { watchBadge.textContent = watchCount; watchBadge.classList.remove('hidden'); }
+    else { watchBadge.classList.add('hidden'); }
 
-    if (dismissCount > 0) {
-        dismissBadge.textContent = dismissCount;
-        dismissBadge.classList.remove('hidden');
-    } else {
-        dismissBadge.classList.add('hidden');
-    }
+    if (seenCount > 0) { seenBadge.textContent = seenCount; seenBadge.classList.remove('hidden'); }
+    else { seenBadge.classList.add('hidden'); }
+
+    if (dismissCount > 0) { dismissBadge.textContent = dismissCount; dismissBadge.classList.remove('hidden'); }
+    else { dismissBadge.classList.add('hidden'); }
 }
 
 // ─── Keyboard navigation ────────────────────────────────────────────
@@ -1366,6 +1867,7 @@ async function init() {
     switchView('discover');
     setupSearch();
     setupFilterTabs();
+    setupSortSelect();
     setupListSearch();
 
     // Register service worker for PWA support + background notifications
@@ -1373,7 +1875,6 @@ async function init() {
         try {
             const swPath = new URL('sw.js', document.baseURI).pathname;
             const registration = await navigator.serviceWorker.register(swPath);
-            console.log('✅ Service worker registered:', registration.scope);
 
             // Register periodic background sync for release notifications
             // (Chrome/Edge on installed PWAs — ~once per day minimum)
@@ -1382,10 +1883,7 @@ async function init() {
                     await registration.periodicSync.register('check-releases', {
                         minInterval: 12 * 60 * 60 * 1000  // 12 hours
                     });
-                    console.log('✅ Periodic sync registered for release checks');
-                } catch {
-                    console.log('ℹ️ Periodic sync not available (app may not be installed)');
-                }
+                } catch { /* periodic sync requires installed PWA */ }
             }
         } catch (error) {
             console.error('❌ Service worker registration failed:', error);
@@ -1400,6 +1898,9 @@ async function init() {
     await loadMoreMovies();
 
     showCurrentCard();
+
+    // Auto-prompt Google sign-in for anonymous users (requires googleClientId in config)
+    tryGoogleOneTap();
 }
 
 init();

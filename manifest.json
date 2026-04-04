@@ -2,33 +2,33 @@
   "name": "Movie Tracker",
   "short_name": "Movies",
   "description": "Track upcoming theatrical and streaming releases",
-  "start_url": "/movie-tracker/",
+  "start_url": ".",
   "display": "standalone",
   "background_color": "#1E1E1E",
   "theme_color": "#62325e",
   "orientation": "portrait",
-  "scope": "/movie-tracker/",
+  "scope": ".",
   "icons": [
     {
-      "src": "/movie-tracker/icons/icon-192.png",
+      "src": "icons/icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/movie-tracker/icons/icon-512.png",
+      "src": "icons/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/movie-tracker/icons/icon-maskable-192.png",
+      "src": "icons/icon-maskable-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "maskable"
     },
     {
-      "src": "/movie-tracker/icons/icon-maskable-512.png",
+      "src": "icons/icon-maskable-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
