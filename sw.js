@@ -1,4 +1,4 @@
-const CACHE_NAME = 'movietracker-v4';
+const CACHE_NAME = 'movietracker-v5';
 
 // Derive base path from SW location (works on both localhost and GitHub Pages)
 const BASE = new URL('.', self.location).pathname;

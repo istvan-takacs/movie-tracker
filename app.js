@@ -64,33 +64,26 @@ const filterTabs = document.querySelectorAll('.filter-tab');
 const googleProvider = new GoogleAuthProvider();
 
 async function ensureAuth() {
-    console.log('[AUTH] Waiting for authStateReady...');
     await auth.authStateReady();
-    console.log('[AUTH] Ready. currentUser:', auth.currentUser?.uid, 'isAnon:', auth.currentUser?.isAnonymous, 'email:', auth.currentUser?.email);
 
     if (!auth.currentUser) {
-        console.log('[AUTH] No persisted session, signing in anonymously');
         await signInAnonymously(auth);
     }
 
     currentUser = auth.currentUser;
-    console.log('[AUTH] Resolved as:', currentUser?.uid, 'isAnon:', currentUser?.isAnonymous);
     updateAuthUI();
 
     // Listen for future auth state changes
     onAuthStateChanged(auth, (user) => {
-        console.log('[AUTH] onAuthStateChanged:', user?.uid, 'isAnon:', user?.isAnonymous, 'email:', user?.email);
         if (user) {
             const prevUid = currentUser ? currentUser.uid : null;
             currentUser = user;
             updateAuthUI();
             if (prevUid && prevUid !== user.uid) {
-                console.log('[AUTH] UID changed from', prevUid, 'to', user.uid);
                 listenToDecisions();
                 showCurrentCard();
             }
         } else if (!isGoogleSignInProgress) {
-            console.log('[AUTH] onAuthStateChanged null — calling signInAnonymously');
             signInAnonymously(auth);
         }
     });
@@ -99,48 +92,62 @@ async function ensureAuth() {
 }
 
 async function signInWithGoogle() {
-    console.log('[AUTH] signInWithGoogle called. currentUser:', currentUser?.uid, 'isAnon:', currentUser?.isAnonymous);
     isGoogleSignInProgress = true;
     try {
+        // Snapshot anonymous data BEFORE switching users so we can merge it
+        // after sign-in (Firestore rules block cross-UID reads).
+        let anonMovies = [];
         if (currentUser && currentUser.isAnonymous) {
-            console.log('[AUTH] Attempting linkWithPopup...');
-            const result = await linkWithPopup(currentUser, googleProvider);
-            currentUser = result.user;
-            console.log('[AUTH] linkWithPopup succeeded. New user:', currentUser.uid, 'isAnon:', currentUser.isAnonymous, 'email:', currentUser.email);
-            showToast('Signed in — your watchlist is now saved to your Google account');
+            try {
+                const snap = await getDocs(collection(db, 'users', currentUser.uid, 'movies'));
+                anonMovies = snap.docs.map(d => ({ id: d.id, data: d.data() }));
+            } catch (_) { /* best effort */ }
+        }
+
+        // Detach old Firestore listener before UID changes to avoid
+        // permission-denied errors on the orphaned anonymous path.
+        if (unsubDecisions) { unsubDecisions(); unsubDecisions = null; }
+
+        if (currentUser && currentUser.isAnonymous) {
+            try {
+                const result = await linkWithPopup(currentUser, googleProvider);
+                currentUser = result.user;
+                showToast('Signed in — your watchlist is now saved to your Google account');
+            } catch (linkErr) {
+                if (linkErr.code === 'auth/credential-already-in-use') {
+                    const credential = GoogleAuthProvider.credentialFromError(linkErr);
+                    if (credential) {
+                        const result = await signInWithCredential(auth, credential);
+                        currentUser = result.user;
+                    } else {
+                        const result = await signInWithPopup(auth, googleProvider);
+                        currentUser = result.user;
+                    }
+                    // Merge anonymous movies into the Google account
+                    await mergeAnonMovies(anonMovies, currentUser.uid);
+                    showToast('Signed in as ' + (currentUser.displayName || currentUser.email || 'Google user'));
+                } else if (linkErr.code === 'auth/popup-closed-by-user' || linkErr.code === 'auth/cancelled-popup-request') {
+                    // User closed popup — stay anonymous, re-attach listener
+                    listenToDecisions();
+                    return;
+                } else {
+                    throw linkErr;
+                }
+            }
         } else {
-            // Direct sign-in (no anonymous session to link)
             const result = await signInWithPopup(auth, googleProvider);
             currentUser = result.user;
             showToast('Signed in as ' + (currentUser.displayName || currentUser.email || 'Google user'));
         }
     } catch (err) {
-        console.log('[AUTH] signInWithGoogle error:', err.code);
-        if (err.code === 'auth/credential-already-in-use') {
-            const credential = GoogleAuthProvider.credentialFromError(err);
-            const anonUid = currentUser ? currentUser.uid : null;
-            const anonUser = currentUser;
-            console.log('[AUTH] credential-already-in-use. credential:', !!credential, 'anonUid:', anonUid);
-            if (credential) {
-                const result = await signInWithCredential(auth, credential);
-                currentUser = result.user;
-                console.log('[AUTH] signInWithCredential succeeded:', currentUser.uid, currentUser.email);
-            } else {
-                const result = await signInWithPopup(auth, googleProvider);
-                currentUser = result.user;
-                console.log('[AUTH] fallback signInWithPopup succeeded:', currentUser.uid, currentUser.email);
-            }
-            await mergeAndCleanupAnonData(anonUid, currentUser.uid);
-            // Don't call anonUser.delete() — it triggers an internal sign-out
-            // that clears the current Google session. Firebase auto-cleans
-            // inactive anonymous users after 30 days.
-            showToast('Signed in as ' + (currentUser.displayName || currentUser.email || 'Google user'));
-        } else if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
-            // User closed the popup — do nothing
+        if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
+            // User closed popup — do nothing
         } else {
             console.error('Google sign-in failed:', err);
             showToast('Sign-in failed. Please try again.');
         }
+        // Re-attach listener if sign-in failed
+        listenToDecisions();
     } finally {
         isGoogleSignInProgress = false;
     }
@@ -148,33 +155,22 @@ async function signInWithGoogle() {
 }
 
 /**
- * Merge movies from an anonymous user's Firestore collection into the
- * Google-authenticated user's collection, then delete the orphaned docs.
+ * Merge pre-captured anonymous movies into the Google user's collection.
+ * Movies are read BEFORE switching users (while still anonymous) to avoid
+ * Firestore permission-denied errors from cross-UID reads.
  */
-async function mergeAndCleanupAnonData(anonUid, googleUid) {
-    if (!anonUid || !googleUid || anonUid === googleUid) return;
+async function mergeAnonMovies(anonMovies, googleUid) {
+    if (!anonMovies.length || !googleUid) return;
     try {
-        const anonMoviesRef = collection(db, 'users', anonUid, 'movies');
-        const anonSnap = await getDocs(anonMoviesRef);
-        if (anonSnap.empty) return;
-
-        // Copy each movie to the Google user's collection (skip if already exists)
-        const googleMoviesRef = collection(db, 'users', googleUid, 'movies');
-        const googleSnap = await getDocs(googleMoviesRef);
+        const googleSnap = await getDocs(collection(db, 'users', googleUid, 'movies'));
         const existingIds = new Set(googleSnap.docs.map(d => d.id));
-
-        for (const anonDoc of anonSnap.docs) {
-            if (!existingIds.has(anonDoc.id)) {
-                await setDoc(doc(db, 'users', googleUid, 'movies', anonDoc.id), anonDoc.data());
+        for (const movie of anonMovies) {
+            if (!existingIds.has(movie.id)) {
+                await setDoc(doc(db, 'users', googleUid, 'movies', movie.id), movie.data);
             }
         }
-
-        // Clean up orphaned Firestore documents
-        for (const anonDoc of anonSnap.docs) {
-            await deleteDoc(anonDoc.ref);
-        }
     } catch (err) {
-        console.warn('Merge/cleanup of anonymous data failed:', err);
+        console.warn('Merge of anonymous data failed:', err);
     }
 }
 
