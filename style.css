@@ -940,14 +940,16 @@ h1 {
 .watchlist-actions {
     display: flex;
     flex-direction: column;
-    gap: 0.3rem;
+    align-items: center;
+    gap: 0.35rem;
     flex-shrink: 0;
     align-self: center;
+    width: 36px;
 }
 
 .btn-seen {
-    width: 30px;
-    height: 30px;
+    width: 32px;
+    height: 32px;
     border-radius: 50%;
     border: 2px solid rgba(76, 175, 80, 0.5);
     background: transparent;
@@ -958,6 +960,8 @@ h1 {
     display: flex;
     align-items: center;
     justify-content: center;
+    padding: 0;
+    line-height: 1;
 }
 
 .btn-seen:hover {
@@ -1020,7 +1024,7 @@ h1 {
     display: inline-flex;
     align-items: center;
     gap: 0.3rem;
-    padding: 0.6rem 1rem;
+    padding: calc(0.6rem + env(safe-area-inset-top, 0px)) 1rem 0.6rem;
     background: rgba(30, 30, 30, 0.85);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
@@ -1367,7 +1371,7 @@ h1 {
 .bottom-tabs button {
     flex: 1;
     position: relative;
-    padding: 0.75rem;
+    padding: 0.75rem 0.25rem;
     background: none;
     border: none;
     color: var(--text-muted);
@@ -1378,6 +1382,9 @@ h1 {
     transition: color 0.2s ease;
     text-transform: uppercase;
     letter-spacing: 0.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .bottom-tabs button:hover {
@@ -1394,16 +1401,19 @@ h1 {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 18px;
-    height: 18px;
-    padding: 0 5px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
     border-radius: 10px;
-    font-size: 0.6rem;
+    font-size: 0.55rem;
     font-weight: 700;
     background: var(--accent-primary);
     color: white;
-    margin-left: 4px;
+    margin-left: 2px;
     vertical-align: middle;
+    line-height: 1;
+    position: relative;
+    top: -1px;
 }
 
 /* ─── Watchlist ────────────────────────────────────────────────────── */
@@ -1513,16 +1523,21 @@ h1 {
 }
 
 .btn-remove {
-    width: 36px;
-    height: 36px;
+    width: 32px;
+    height: 32px;
     border-radius: 50%;
     border: 1px solid var(--border-color);
     background: transparent;
     color: var(--text-muted);
-    font-size: 0.9rem;
+    font-size: 0.85rem;
     cursor: pointer;
     flex-shrink: 0;
     transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    line-height: 1;
 }
 
 .btn-remove:hover {
@@ -1859,14 +1874,17 @@ h1 {
     }
 
     .bottom-tabs button {
-        font-size: 0.65rem;
-        padding: 0.4rem 0.25rem;
+        font-size: 0.6rem;
+        padding: 0.4rem 0.15rem;
+        letter-spacing: 0.2px;
     }
 
     .tab-badge {
-        min-width: 16px;
-        height: 16px;
-        font-size: 0.55rem;
+        min-width: 14px;
+        height: 14px;
+        font-size: 0.5rem;
+        padding: 0 3px;
+        margin-left: 1px;
     }
 
     .swipe-overlay {

@@ -430,6 +430,21 @@ function getUndecidedMovies(movies) {
     return movies.filter(m => !userMovies.has(Number(m.id)));
 }
 
+/**
+ * Filter out rereleases — movies whose original release date is more than
+ * 2 years before today. TMDB's upcoming endpoint returns re-releases of
+ * classic films that clutter the discover feed.
+ */
+function filterRereleases(movies) {
+    const twoYearsAgo = new Date();
+    twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
+    const cutoff = twoYearsAgo.toISOString().split('T')[0];
+    return movies.filter(m => {
+        if (!m.release_date) return true; // keep movies without dates
+        return m.release_date >= cutoff;
+    });
+}
+
 function calculateHypeScore(movie) {
     const popularity = movie.popularity || 0;
     const voteCount = movie.vote_count || 0;
@@ -502,7 +517,8 @@ async function loadMoreMovies() {
         const existingIds = new Set(currentMovies.map(m => m.id));
         newMovies = newMovies.filter(m => !existingIds.has(m.id));
 
-        const undecided = getUndecidedMovies(newMovies);
+        const fresh = filterRereleases(newMovies);
+        const undecided = getUndecidedMovies(fresh);
         currentMovies.push(...undecided);
 
         // Sort remaining unseen movies (preserve already-viewed order)
@@ -517,7 +533,7 @@ async function loadMoreMovies() {
 
 function updateDiscoverCounter() {
     if (isSearchMode) return; // Search mode manages its own counter
-    const remaining = currentMovies.length - currentIndex;
+    const remaining = currentMovies.slice(currentIndex).filter(m => !userMovies.has(Number(m.id))).length;
     if (remaining > 0) {
         discoverCounter.textContent = `${remaining} movie${remaining !== 1 ? 's' : ''} to discover`;
         discoverCounter.classList.remove('hidden');
@@ -535,6 +551,11 @@ function showCurrentCard() {
         currentMovies.push(...skippedQueue);
         skippedQueue = [];
         showToast('Showing skipped movies again');
+    }
+
+    // Skip past any movies that have been decided on since they were loaded
+    while (currentIndex < currentMovies.length && userMovies.has(Number(currentMovies[currentIndex].id))) {
+        currentIndex++;
     }
 
     if (currentIndex >= currentMovies.length) {
@@ -981,6 +1002,24 @@ function createSearchResultItem(movie) {
 
     wrap.appendChild(item);
     setupSearchItemSwipe(wrap, item, movie);
+
+    // Tap (no swipe) opens detail view
+    let srTapStart = null;
+    item.addEventListener('pointerdown', (e) => {
+        if (e.target.closest('a, button')) return;
+        srTapStart = { x: e.clientX, y: e.clientY, time: Date.now() };
+    });
+    item.addEventListener('pointerup', (e) => {
+        if (!srTapStart) return;
+        const dx = Math.abs(e.clientX - srTapStart.x);
+        const dy = Math.abs(e.clientY - srTapStart.y);
+        const dt = Date.now() - srTapStart.time;
+        srTapStart = null;
+        if (dx < 10 && dy < 10 && dt < 300) {
+            openDetail(movie.id);
+        }
+    });
+
     return wrap;
 }
 
