@@ -325,31 +325,7 @@ h1 {
     color: var(--text-primary);
 }
 
-/* ─── Notification prompt ────────────────────────────────────────── */
-
-.notification-prompt {
-    display: block;
-    width: 100%;
-    max-width: 600px;
-    margin: 0 auto var(--gap-md);
-    padding: 0.65rem 1rem;
-    border: 1px dashed var(--border-color);
-    border-radius: var(--radius-md);
-    background: rgba(245, 197, 24, 0.05);
-    color: var(--text-muted);
-    font-family: "Open Sans", "Lexend", sans-serif;
-    font-size: 0.8rem;
-    font-weight: 500;
-    cursor: pointer;
-    text-align: center;
-    transition: all 0.2s ease;
-}
-
-.notification-prompt:hover {
-    border-color: var(--accent-gold);
-    color: var(--accent-gold);
-    background: rgba(245, 197, 24, 0.1);
-}
+/* ─── Notification prompt (removed) ──────────────────────────────── */
 
 /* ─── Discover counter ────────────────────────────────────────────── */
 
@@ -971,33 +947,127 @@ h1 {
 
 /* ─── Seen view ──────────────────────────────────────────────────── */
 
-.seen-date {
-    font-size: 0.68rem;
-    color: var(--text-muted);
-    margin-top: 0.15rem;
-}
-
-.seen-rating {
+.seen-toolbar {
     display: flex;
-    align-items: baseline;
-    gap: 0.1rem;
-    flex-shrink: 0;
-    align-self: center;
-    padding: 0.3rem 0.5rem;
-    border-radius: var(--radius-md);
-    background: rgba(255, 193, 7, 0.12);
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: var(--gap-sm);
 }
 
-.seen-rating-number {
-    font-size: 1.4rem;
+.seen-stats {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    margin-bottom: var(--gap-sm);
+    text-align: center;
+    letter-spacing: 0.3px;
+}
+
+/* Compact poster grid */
+.seen-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.5rem;
+}
+
+.seen-grid-item {
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.seen-poster-wrap {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 2/3;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background: var(--bg-tertiary);
+}
+
+.seen-poster {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    transition: transform 0.2s ease;
+}
+
+.seen-grid-item:hover .seen-poster {
+    transform: scale(1.03);
+}
+
+.seen-no-poster {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    color: var(--text-muted);
+    font-size: 1.5rem;
+}
+
+.seen-rating-badge {
+    position: absolute;
+    top: 0.3rem;
+    left: 0.3rem;
+    background: rgba(0, 0, 0, 0.75);
+    color: var(--accent-gold);
+    font-size: 0.65rem;
     font-weight: 700;
+    padding: 0.15rem 0.35rem;
+    border-radius: 4px;
+    line-height: 1.3;
+    backdrop-filter: blur(4px);
+}
+
+.seen-rating-none {
+    color: var(--text-muted);
+}
+
+.seen-edit-btn {
+    position: absolute;
+    bottom: 0.3rem;
+    right: 0.3rem;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(0, 0, 0, 0.65);
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.2s ease, color 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(4px);
+}
+
+.seen-grid-item:hover .seen-edit-btn {
+    opacity: 1;
+}
+
+.seen-edit-btn:hover {
     color: var(--accent-gold);
 }
 
-.seen-rating-label {
-    font-size: 0.7rem;
+.seen-grid-title {
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-top: 0.3rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.seen-grid-date {
+    font-size: 0.58rem;
     color: var(--text-muted);
-    font-weight: 500;
+    margin-top: 0.05rem;
 }
 
 /* ─── Movie detail overlay ───────────────────────────────────────── */
@@ -1081,6 +1151,24 @@ h1 {
     font-size: 0.78rem;
     color: var(--text-muted);
     font-weight: 500;
+}
+
+.imdb-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.18rem 0.55rem;
+    border-radius: 4px;
+    background: #f5c518;
+    color: #000;
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-decoration: none;
+    letter-spacing: 0.3px;
+    transition: filter 0.15s ease;
+}
+
+.imdb-badge:hover {
+    filter: brightness(1.1);
 }
 
 .detail-section {
@@ -1729,11 +1817,6 @@ h1 {
         background: #0a0a0a;
     }
 
-    /* More poster space when notification prompt is gone */
-    .view:has(.notification-prompt.hidden) .movie-card > img {
-        max-height: calc(100dvh - 30rem);
-    }
-
     .no-poster {
         height: 160px;
     }
@@ -1829,11 +1912,7 @@ h1 {
         letter-spacing: 0.3px;
     }
 
-    .notification-prompt {
-        font-size: 0.68rem;
-        padding: 0.35rem 0.6rem;
-        margin-bottom: 0.25rem;
-    }
+
 
     .sort-row {
         margin-bottom: 0.3rem;
@@ -1928,9 +2007,14 @@ h1 {
         gap: 0.25rem;
     }
 
-    /* Make restore button always visible on mobile (no hover) */
-    .dismissed-item .btn-restore {
-        opacity: 0.8;
+    /* Make restore/edit buttons always visible on mobile (no hover) */
+    .dismissed-item .btn-restore,
+    .seen-edit-btn {
+        opacity: 0.85;
+    }
+
+    .seen-toolbar {
+        gap: 0.35rem;
     }
 
     /* List search bars mobile */

@@ -287,10 +287,109 @@ async function fetchStreaming(page = 1) {
 }
 
 async function searchMovies(query, page = 1) {
-    const url = `${TMDB_BASE}/search/movie?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(query)}&page=${page}`;
+    const url = `${TMDB_BASE}/search/movie?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(query)}&page=${page}&include_adult=false`;
     const res = await fetch(url);
     const data = await res.json();
     return (data.results || []).map(m => ({ ...m, _source: 'search' }));
+}
+
+/**
+ * Strip leading articles ("The ", "A ", "An ") from a title for matching.
+ */
+function stripArticle(str) {
+    return str.replace(/^(the|a|an)\s+/i, '').trim();
+}
+
+/**
+ * Simple character-level similarity: longest common subsequence ratio.
+ * Returns 0–1 where 1 = identical.
+ */
+function similarity(a, b) {
+    a = a.toLowerCase();
+    b = b.toLowerCase();
+    if (a === b) return 1;
+    if (b.includes(a) || a.includes(b)) return 0.9;
+    // Compute overlap using bigrams
+    const bigrams = (s) => {
+        const set = new Set();
+        for (let i = 0; i < s.length - 1; i++) set.add(s.slice(i, i + 2));
+        return set;
+    };
+    const ba = bigrams(a);
+    const bb = bigrams(b);
+    let inter = 0;
+    ba.forEach(bg => { if (bb.has(bg)) inter++; });
+    return (2 * inter) / (ba.size + bb.size || 1);
+}
+
+/**
+ * Score how well a query matches a movie title.
+ * Higher = better match.
+ */
+function fuzzyScore(query, movie) {
+    const q = query.toLowerCase().trim();
+    const title = (movie.title || '').toLowerCase();
+    const titleNoArticle = stripArticle(title);
+    const qNoArticle = stripArticle(q);
+
+    let score = 0;
+
+    // Exact match
+    if (title === q || titleNoArticle === qNoArticle) return 100;
+
+    // Title starts with query (partial)
+    if (title.startsWith(q) || titleNoArticle.startsWith(qNoArticle)) score += 60;
+
+    // Query is a substring of title
+    if (title.includes(q) || titleNoArticle.includes(qNoArticle)) score += 40;
+
+    // Word-level match — each query word found in title
+    const qWords = qNoArticle.split(/\s+/).filter(Boolean);
+    const titleWords = titleNoArticle.split(/\s+/);
+    const matchedWords = qWords.filter(w => titleWords.some(t => t.startsWith(w) || similarity(w, t) > 0.7));
+    score += (matchedWords.length / Math.max(qWords.length, 1)) * 30;
+
+    // Bigram similarity (handles typos)
+    score += similarity(qNoArticle, titleNoArticle) * 20;
+
+    // Boost popular / well-rated movies slightly
+    score += Math.min((movie.vote_count || 0) / 5000, 1) * 5;
+    score += Math.min((movie.vote_average || 0) / 10, 1) * 3;
+
+    return score;
+}
+
+/**
+ * Search with fuzzy reranking. Primary TMDB search + optional article-stripped
+ * secondary search merged and ranked by fuzzy score.
+ */
+async function smartSearch(query) {
+    const stripped = stripArticle(query);
+
+    // Run primary search (and secondary without article if different)
+    const searches = [searchMovies(query)];
+    if (stripped !== query && stripped.length >= 2) {
+        searches.push(searchMovies(stripped));
+    }
+
+    const results = await Promise.all(searches);
+    const merged = results.flat();
+
+    // Deduplicate by id
+    const seen = new Set();
+    const unique = merged.filter(m => {
+        if (seen.has(m.id)) return false;
+        seen.add(m.id);
+        return true;
+    });
+
+    // Score and sort: threshold 5 filters out completely irrelevant results
+    const scored = unique
+        .map(m => ({ m, score: fuzzyScore(query, m) }))
+        .filter(x => x.score > 5)
+        .sort((a, b) => b.score - a.score);
+
+    return scored.map(x => x.m);
 }
 
 async function fetchMovieDetails(tmdbId) {
@@ -778,12 +877,19 @@ async function openDetail(tmdbId) {
             <button class="detail-action-btn detail-btn-dismiss" data-tmdb-id="${tmdbId}">✕ Dismiss</button>`;
     }
 
+    const isReleased = details.release_date && details.release_date <= new Date().toISOString().split('T')[0];
+    const imdbId = details.imdb_id;
+    const imdbLink = imdbId && isReleased
+        ? `<a class="imdb-badge" href="https://www.imdb.com/title/${imdbId}/" target="_blank" rel="noopener">IMDb ↗</a>`
+        : '';
+
     content.innerHTML = `
         ${posterUrl ? `<img src="${posterUrl}" alt="${details.title}" class="detail-poster">` : ''}
         <div class="detail-info">
             <h2 class="detail-title">${details.title} ${details.release_date ? `<span class="detail-year">(${details.release_date.slice(0, 4)})</span>` : ''}</h2>
             <div class="detail-meta">
-                <span class="score-badge rating">★ ${rating}</span>
+                <span class="score-badge rating" title="TMDB Rating">★ ${rating}</span>
+                ${imdbLink}
                 <span class="score-badge popularity">🔥 ${popularity}</span>
                 ${runtime ? `<span class="detail-runtime">${runtime}</span>` : ''}
             </div>
@@ -925,7 +1031,7 @@ async function enterSearchMode(query) {
     searchResults.innerHTML = '<div class="loading"><div class="spinner"></div><p>Searching…</p></div>';
 
     try {
-        const results = await searchMovies(query);
+        const results = await smartSearch(query);
         currentMovies = results;  // Show all results including already-decided
         renderSearchResults();
     } catch (err) {
@@ -1025,22 +1131,36 @@ function createSearchResultItem(movie) {
 
 function setupSearchItemSwipe(wrap, item, movie) {
     let startX = 0;
+    let startY = 0;
     let deltaX = 0;
     let isTracking = false;
+    let directionLocked = false; // true once we know horizontal vs vertical
     const THRESHOLD = 80;
+    const DIRECTION_LOCK = 6; // px before we decide direction
     const actionRight = wrap.querySelector('.sr-action-right');
     const actionLeft = wrap.querySelector('.sr-action-left');
 
-    function onStart(x) {
+    function onStart(x, y) {
         startX = x;
+        startY = y;
         deltaX = 0;
-        isTracking = true;
+        isTracking = false;
+        directionLocked = false;
         item.style.transition = 'none';
         actionRight.style.opacity = 0;
         actionLeft.style.opacity = 0;
     }
 
-    function onMove(x) {
+    function onMove(x, y) {
+        const dy = Math.abs(y - startY);
+        const dx = Math.abs(x - startX);
+
+        // Lock direction once moved enough
+        if (!directionLocked && (dx > DIRECTION_LOCK || dy > DIRECTION_LOCK)) {
+            directionLocked = true;
+            isTracking = dx > dy; // only swipe if more horizontal than vertical
+        }
+
         if (!isTracking) return;
         deltaX = x - startX;
         item.style.transform = `translateX(${deltaX}px)`;
@@ -1101,12 +1221,13 @@ function setupSearchItemSwipe(wrap, item, movie) {
 
     wrap.addEventListener('touchstart', (e) => {
         if (e.target.closest('a, button')) return;
-        onStart(e.touches[0].clientX);
+        onStart(e.touches[0].clientX, e.touches[0].clientY);
     }, { passive: true });
 
     wrap.addEventListener('touchmove', (e) => {
-        onMove(e.touches[0].clientX);
-        if (isTracking && Math.abs(deltaX) > 10) e.preventDefault();
+        onMove(e.touches[0].clientX, e.touches[0].clientY);
+        // Only prevent scroll if we've confirmed horizontal swipe direction
+        if (isTracking && e.cancelable) e.preventDefault();
     }, { passive: false });
 
     wrap.addEventListener('touchend', onEnd);
@@ -1114,8 +1235,8 @@ function setupSearchItemSwipe(wrap, item, movie) {
     wrap.addEventListener('mousedown', (e) => {
         if (e.target.closest('a, button')) return;
         e.preventDefault();
-        onStart(e.clientX);
-        const mouseMoveHandler = (e2) => onMove(e2.clientX);
+        onStart(e.clientX, e.clientY);
+        const mouseMoveHandler = (e2) => onMove(e2.clientX, e2.clientY);
         const mouseUpHandler = () => {
             onEnd();
             document.removeEventListener('mousemove', mouseMoveHandler);
@@ -1374,6 +1495,7 @@ async function advanceCard(status) {
 let watchlistFilter = '';
 let dismissedFilter = '';
 let seenFilter = '';
+let seenSortBy = 'recent';
 
 function setupListSearch() {
     const watchlistSearch = document.getElementById('watchlist-search');
@@ -1418,6 +1540,14 @@ function setupListSearch() {
         seenClear.classList.add('hidden');
         renderSeen();
     });
+
+    const seenSortEl = document.getElementById('seen-sort');
+    if (seenSortEl) {
+        seenSortEl.addEventListener('change', () => {
+            seenSortBy = seenSortEl.value;
+            renderSeen();
+        });
+    }
 }
 
 function matchesFilter(movie, filter) {
@@ -1574,59 +1704,79 @@ function renderDismissed() {
 
 // ─── Seen view ──────────────────────────────────────────────────────
 function renderSeen() {
-    const seen = [];
-    userMovies.forEach((m) => {
-        if (m.status === 'seen' && matchesFilter(m, seenFilter)) seen.push(m);
+    const allSeen = [];
+    userMovies.forEach((m) => { if (m.status === 'seen') allSeen.push(m); });
+
+    // Update stats bar (counts all seen, ignores filter)
+    const statsEl = document.getElementById('seen-stats');
+    if (statsEl) {
+        if (allSeen.length > 0) {
+            const rated = allSeen.filter(m => m.rating);
+            const avg = rated.length
+                ? (rated.reduce((s, m) => s + m.rating, 0) / rated.length).toFixed(1)
+                : null;
+            statsEl.textContent = `${allSeen.length} movie${allSeen.length !== 1 ? 's' : ''}${avg ? ` · avg ★ ${avg}` : ''}`;
+            statsEl.classList.remove('hidden');
+        } else {
+            statsEl.classList.add('hidden');
+        }
+    }
+
+    const seen = allSeen.filter(m => matchesFilter(m, seenFilter));
+
+    // Sort
+    seen.sort((a, b) => {
+        if (seenSortBy === 'rating') return (b.rating || 0) - (a.rating || 0);
+        if (seenSortBy === 'title') return (a.title || '').localeCompare(b.title || '');
+        if (seenSortBy === 'year') return (b.releaseDate || '').localeCompare(a.releaseDate || '');
+        return (b.seenAt || '').localeCompare(a.seenAt || ''); // recent
     });
 
-    seen.sort((a, b) => (b.seenAt || '').localeCompare(a.seenAt || ''));
-
     if (seen.length === 0) {
-        const msg = seenFilter
-            ? `No matches for "${seenFilter}".`
-            : 'No seen movies yet.';
-        const hint = seenFilter
-            ? 'Try a different search term.'
-            : 'Mark movies as seen from your watchlist!';
+        const msg = seenFilter ? `No matches for "${seenFilter}".` : 'No seen movies yet.';
+        const hint = seenFilter ? 'Try a different search term.' : 'Mark movies as seen from your watchlist!';
         seenContainer.innerHTML = `<div class="empty-state"><p>${msg}</p><p class="hint">${hint}</p></div>`;
         return;
     }
 
-    let html = '';
+    let html = '<div class="seen-grid">';
     seen.forEach(m => {
         const posterUrl = getImageUrl(m.posterPath, 'w185');
-        const releaseFormatted = formatDate(m.releaseDate);
+        const userRating = m.rating != null ? m.rating : null;
         const seenDate = m.seenAt ? formatDate(m.seenAt.split('T')[0]) : '';
-        const userRating = m.rating || '—';
 
         html += `
-            <div class="watchlist-item seen-item" data-tmdb-id="${m.tmdbId}">
-                ${posterUrl
-                    ? `<img src="${posterUrl}" alt="${m.title}" class="watchlist-poster">`
-                    : '<div class="watchlist-poster no-poster-sm">?</div>'}
-                <div class="watchlist-info">
-                    <h4>${m.title}</h4>
-                    <p class="release-date">${releaseFormatted}</p>
-                    <div class="watchlist-meta">
-                        ${(m.genres || []).slice(0, 2).map(g => `<span class="genre-badge small">${g}</span>`).join('')}
-                    </div>
-                    <p class="seen-date">Seen ${seenDate}</p>
+            <div class="seen-grid-item" data-tmdb-id="${m.tmdbId}">
+                <div class="seen-poster-wrap">
+                    ${posterUrl
+                        ? `<img src="${posterUrl}" alt="${m.title}" class="seen-poster">`
+                        : '<div class="seen-poster seen-no-poster">?</div>'}
+                    ${userRating != null
+                        ? `<span class="seen-rating-badge">★${userRating}</span>`
+                        : '<span class="seen-rating-badge seen-rating-none">—</span>'}
+                    <button class="seen-edit-btn" title="Edit rating" data-tmdb-id="${m.tmdbId}">✏</button>
                 </div>
-                <div class="seen-rating" title="Your rating">
-                    <span class="seen-rating-number">${userRating}</span>
-                    <span class="seen-rating-label">/10</span>
-                </div>
+                <p class="seen-grid-title">${m.title}</p>
+                ${seenDate ? `<p class="seen-grid-date">${seenDate}</p>` : ''}
             </div>
         `;
     });
-
+    html += '</div>';
     seenContainer.innerHTML = html;
 
-    seenContainer.querySelectorAll('.seen-item').forEach(item => {
-        item.addEventListener('click', () => {
+    seenContainer.querySelectorAll('.seen-grid-item').forEach(item => {
+        item.addEventListener('click', (e) => {
+            if (e.target.closest('.seen-edit-btn')) return; // handled separately
             openDetail(Number(item.dataset.tmdbId));
         });
         item.style.cursor = 'pointer';
+    });
+
+    seenContainer.querySelectorAll('.seen-edit-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openRatingModal(Number(btn.dataset.tmdbId), true);
+        });
     });
 }
 
@@ -1634,13 +1784,18 @@ function renderSeen() {
 let ratingModalMovieId = null;
 let ratingModalValue = null;
 
-function openRatingModal(tmdbId) {
+function openRatingModal(tmdbId, isEdit = false) {
     ratingModalMovieId = tmdbId;
     ratingModalValue = null;
     const movie = userMovies.get(tmdbId);
     if (!movie) return;
 
+    // Update modal heading based on context
+    document.querySelector('#rating-modal .modal-title').textContent =
+        isEdit ? 'Update Rating' : 'Mark as Seen';
     document.getElementById('rating-modal-title').textContent = movie.title;
+
+    const existingRating = movie.rating || null;
 
     const buttonsContainer = document.getElementById('rating-buttons');
     buttonsContainer.innerHTML = '';
@@ -1648,6 +1803,11 @@ function openRatingModal(tmdbId) {
         const btn = document.createElement('button');
         btn.className = 'rating-btn';
         btn.textContent = i;
+        // Pre-select existing rating when editing
+        if (existingRating === i) {
+            btn.classList.add('selected');
+            ratingModalValue = i;
+        }
         btn.addEventListener('click', () => {
             ratingModalValue = i;
             buttonsContainer.querySelectorAll('.rating-btn').forEach(b => b.classList.remove('selected'));
@@ -1674,11 +1834,13 @@ document.getElementById('rating-save').addEventListener('click', async () => {
     const movie = userMovies.get(ratingModalMovieId);
     if (movie) {
         const movieRef = doc(db, 'users', currentUser.uid, 'movies', String(ratingModalMovieId));
+        // Preserve existing seenAt if already set (editing a rating, not fresh mark)
+        const seenAt = movie.seenAt || new Date().toISOString();
         await setDoc(movieRef, {
             ...movie,
             status: 'seen',
             rating: ratingModalValue,
-            seenAt: new Date().toISOString(),
+            seenAt,
         });
         showToast(`Rated "${movie.title}" ${ratingModalValue}/10 ★`);
     }
@@ -1888,18 +2050,7 @@ btnDismiss.addEventListener('click', () => advanceCard('dismissed'));
 document.getElementById('btn-google-signin').addEventListener('click', signInWithGoogle);
 document.getElementById('btn-signout').addEventListener('click', handleSignOut);
 
-// ─── Notification permission button ─────────────────────────────────
-const notifBtn = document.getElementById('btn-notifications');
-if (notifBtn) {
-    // Hide if already granted or not supported
-    if (!('Notification' in window) || Notification.permission === 'granted') {
-        notifBtn.classList.add('hidden');
-    }
-    notifBtn.addEventListener('click', async () => {
-        await requestNotificationPermission();
-        notifBtn.classList.add('hidden');
-    });
-}
+// Notifications disabled — button removed from UI
 
 // ─── Init ────────────────────────────────────────────────────────────
 async function init() {

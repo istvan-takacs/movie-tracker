@@ -10,7 +10,7 @@
     <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
     <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
     <title>Movie Tracker</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=2">
     <link rel="manifest" href="manifest.json">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
@@ -61,11 +61,6 @@
             </select>
         </div>
 
-        <!-- Notification prompt -->
-        <button id="btn-notifications" class="notification-prompt">
-            🔔 Enable release notifications
-        </button>
-
         <p id="discover-counter" class="discover-counter hidden"></p>
 
         <!-- Search results list (shown in search mode) -->
@@ -93,10 +88,19 @@
     <!-- View 3: Seen -->
     <section id="view-seen" class="view">
         <h2 class="view-title">Seen</h2>
-        <div class="search-bar list-search-bar">
-            <input type="text" id="seen-search" class="list-search-input" placeholder="Search seen…" autocomplete="off">
-            <button id="seen-search-clear" class="search-clear hidden" aria-label="Clear search">✕</button>
+        <div class="seen-toolbar">
+            <div class="search-bar list-search-bar" style="flex:1;margin-bottom:0;">
+                <input type="text" id="seen-search" class="list-search-input" placeholder="Search seen…" autocomplete="off">
+                <button id="seen-search-clear" class="search-clear hidden" aria-label="Clear search">✕</button>
+            </div>
+            <select id="seen-sort" class="sort-select" aria-label="Sort seen movies">
+                <option value="recent">Recent</option>
+                <option value="rating">Rating ↓</option>
+                <option value="title">A–Z</option>
+                <option value="year">Year</option>
+            </select>
         </div>
+        <p id="seen-stats" class="seen-stats hidden"></p>
         <div id="seen-container"></div>
     </section>
 
@@ -152,6 +156,6 @@
     </button>
 </nav>
 
-<script type="module" src="app.js"></script>
+<script type="module" src="app.js?v=2"></script>
 </body>
 </html>
