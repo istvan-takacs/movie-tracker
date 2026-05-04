@@ -851,6 +851,8 @@ async function openDetail(tmdbId) {
     const posterUrl = getImageUrl(details.poster_path);
     const genres = (details.genres || []).map(g => g.name);
     const rating = details.vote_average ? details.vote_average.toFixed(1) : '—';
+    const voteCount = details.vote_count || 0;
+    const voteCountStr = voteCount >= 1000 ? `${(voteCount / 1000).toFixed(0)}K` : String(voteCount);
     const popularity = details.popularity ? Math.round(details.popularity) : 0;
     const runtime = details.runtime ? `${Math.floor(details.runtime / 60)}h ${details.runtime % 60}m` : '';
     const releaseFormatted = formatDate(details.release_date);
@@ -868,7 +870,10 @@ async function openDetail(tmdbId) {
             <button class="detail-action-btn detail-btn-seen" data-tmdb-id="${tmdbId}">✓ Mark as Seen</button>
             <button class="detail-action-btn detail-btn-dismiss" data-tmdb-id="${tmdbId}">✕ Remove</button>`;
     } else if (status === 'seen') {
-        actionsHtml = `<p class="detail-seen-info">You rated this ★ ${movieData.rating}/10</p>`;
+        const ratingLabel = movieData.rating ? `★ ${movieData.rating}/10` : 'Unrated';
+        actionsHtml = `
+            <p class="detail-seen-info">${ratingLabel}</p>
+            <button class="detail-action-btn detail-btn-edit-rating" data-tmdb-id="${tmdbId}">✏ Edit Rating</button>`;
     } else if (status === 'dismissed') {
         actionsHtml = `<button class="detail-action-btn detail-btn-restore" data-tmdb-id="${tmdbId}">↩ Restore to Watchlist</button>`;
     } else {
@@ -877,19 +882,21 @@ async function openDetail(tmdbId) {
             <button class="detail-action-btn detail-btn-dismiss" data-tmdb-id="${tmdbId}">✕ Dismiss</button>`;
     }
 
-    const isReleased = details.release_date && details.release_date <= new Date().toISOString().split('T')[0];
-    const imdbId = details.imdb_id;
-    const imdbLink = imdbId && isReleased
-        ? `<a class="imdb-badge" href="https://www.imdb.com/title/${imdbId}/" target="_blank" rel="noopener">IMDb ↗</a>`
+    // Prominent score display
+    const scoreHtml = rating !== '—'
+        ? `<div class="detail-score">
+               <span class="detail-score-number">★ ${rating}</span>
+               <span class="detail-score-denom">/10</span>
+               ${voteCount > 0 ? `<span class="detail-score-votes">(${voteCountStr} votes)</span>` : ''}
+           </div>`
         : '';
 
     content.innerHTML = `
         ${posterUrl ? `<img src="${posterUrl}" alt="${details.title}" class="detail-poster">` : ''}
         <div class="detail-info">
             <h2 class="detail-title">${details.title} ${details.release_date ? `<span class="detail-year">(${details.release_date.slice(0, 4)})</span>` : ''}</h2>
+            ${scoreHtml}
             <div class="detail-meta">
-                <span class="score-badge rating" title="TMDB Rating">★ ${rating}</span>
-                ${imdbLink}
                 <span class="score-badge popularity">🔥 ${popularity}</span>
                 ${runtime ? `<span class="detail-runtime">${runtime}</span>` : ''}
             </div>
@@ -969,6 +976,10 @@ async function openDetail(tmdbId) {
             showToast(`Restored "${details.title}" to watchlist ✓`);
         }
         closeDetail();
+    });
+    const editRatingBtn = content.querySelector('.detail-btn-edit-rating');
+    if (editRatingBtn) editRatingBtn.addEventListener('click', () => {
+        openRatingModal(Number(tmdbId), true);
     });
 }
 
@@ -1584,39 +1595,42 @@ function renderWatchlist() {
     for (const [label, movies] of groups) {
         if (movies.length === 0) continue;
         html += `<h3 class="group-header">${label} <span class="group-count">(${movies.length})</span></h3>`;
+        html += '<div class="watchlist-grid">';
         movies.forEach(m => {
             const posterUrl = getImageUrl(m.posterPath, 'w185');
             const releaseFormatted = formatDate(m.releaseDate);
             const isReleasingSoon = isWithinDays(m.releaseDate, 7);
             const isPast = m.releaseDate && new Date(m.releaseDate) <= now;
-            const rating = m.voteAverage ? m.voteAverage.toFixed(1) : '—';
+            const rating = m.voteAverage ? m.voteAverage.toFixed(1) : null;
 
             html += `
-                <div class="watchlist-item${isReleasingSoon ? ' releasing-soon' : ''}${isPast ? ' now-available' : ''}" data-tmdb-id="${m.tmdbId}">
-                    ${posterUrl
-                        ? `<img src="${posterUrl}" alt="${m.title}" class="watchlist-poster">`
-                        : '<div class="watchlist-poster no-poster-sm">?</div>'}
-                    <div class="watchlist-info">
-                        <h4>${m.title}</h4>
-                        <p class="release-date">${releaseFormatted}</p>
-                        ${isPast ? '<span class="badge-available">Now Available</span>' : ''}
-                        <div class="watchlist-meta">
-                            <span class="score-badge rating small">★ ${rating}</span>
-                            ${(m.genres || []).slice(0, 2).map(g => `<span class="genre-badge small">${g}</span>`).join('')}
+                <div class="watchlist-grid-item" data-tmdb-id="${m.tmdbId}">
+                    <div class="wl-poster-wrap">
+                        ${posterUrl
+                            ? `<img src="${posterUrl}" alt="${m.title}" class="wl-poster">`
+                            : '<div class="wl-poster-placeholder">?</div>'}
+                        ${isPast
+                            ? '<div class="wl-available-badge"><span>Available</span></div>'
+                            : isReleasingSoon
+                                ? '<div class="wl-soon-badge">Soon</div>'
+                                : ''}
+                        ${rating ? `<div class="wl-rating-badge">★${rating}</div>` : ''}
+                        <div class="wl-date-strip">${isPast ? 'Out now' : releaseFormatted}</div>
+                        <div class="wl-actions">
+                            <button class="btn-wl-seen" title="Mark as seen" data-tmdb-id="${m.tmdbId}">✓</button>
+                            <button class="btn-wl-remove" title="Dismiss" data-tmdb-id="${m.tmdbId}">✕</button>
                         </div>
                     </div>
-                    <div class="watchlist-actions">
-                        <button class="btn-seen" title="Mark as seen" data-tmdb-id="${m.tmdbId}">✓</button>
-                        <button class="btn-remove" title="Dismiss" data-action="dismiss" data-tmdb-id="${m.tmdbId}">✕</button>
-                    </div>
+                    <p class="wl-title">${m.title}</p>
                 </div>
             `;
         });
+        html += '</div>';
     }
 
     watchlistContainer.innerHTML = html;
 
-    watchlistContainer.querySelectorAll('.btn-remove').forEach(btn => {
+    watchlistContainer.querySelectorAll('.btn-wl-remove').forEach(btn => {
         btn.addEventListener('click', async (e) => {
             e.stopPropagation();
             const id = Number(btn.dataset.tmdbId);
@@ -1629,7 +1643,7 @@ function renderWatchlist() {
         });
     });
 
-    watchlistContainer.querySelectorAll('.btn-seen').forEach(btn => {
+    watchlistContainer.querySelectorAll('.btn-wl-seen').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
             const id = Number(btn.dataset.tmdbId);
@@ -1637,11 +1651,10 @@ function renderWatchlist() {
         });
     });
 
-    watchlistContainer.querySelectorAll('.watchlist-item').forEach(item => {
+    watchlistContainer.querySelectorAll('.watchlist-grid-item').forEach(item => {
         item.addEventListener('click', () => {
             openDetail(Number(item.dataset.tmdbId));
         });
-        item.style.cursor = 'pointer';
     });
 }
 
