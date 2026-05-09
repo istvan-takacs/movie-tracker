@@ -11,4 +11,8 @@ const firebaseConfig = {
   // Find this in: Firebase Console → Authentication → Sign-in method → Google → Web client ID
   const googleClientId = "";
 
-  export { firebaseConfig, googleClientId };
+  // OMDb API key for IMDb + Rotten Tomatoes scores.
+  // Free tier (1000 req/day): https://www.omdbapi.com/apikey.aspx
+  const omdbApiKey = "fdb8cf16";
+
+  export { firebaseConfig, googleClientId, omdbApiKey };

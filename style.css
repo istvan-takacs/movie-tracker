@@ -347,7 +347,7 @@ h1 {
 .search-swipe-hint {
     text-align: center;
     font-size: 0.7rem;
-    color: #555;
+    color: var(--text-muted);
     margin-bottom: var(--gap-sm);
 }
 
@@ -480,6 +480,128 @@ h1 {
 /* Legacy overlays — replaced by sr-action panels */
 .sr-overlay {
     display: none;
+}
+
+/* ─── Decided search results ──────────────────────────────────────── */
+
+.sr-decided-header {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+    margin: 1rem 0 0.4rem;
+    padding: 0 0.1rem;
+}
+
+.sr-decided-item {
+    display: flex;
+    align-items: center;
+    gap: var(--gap-md);
+    padding: 0.5rem 0.8rem;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    margin-bottom: 0.35rem;
+    opacity: 0.5;
+    cursor: pointer;
+    transition: opacity 0.2s;
+}
+
+.sr-decided-item:hover {
+    opacity: 0.8;
+}
+
+.sr-decided-status {
+    font-size: 0.6rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    padding: 0.18rem 0.5rem;
+    border-radius: 20px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.sr-decided-status.status-interested {
+    background: rgba(76, 175, 80, 0.18);
+    color: #4CAF50;
+}
+
+.sr-decided-status.status-seen {
+    background: rgba(245, 197, 24, 0.15);
+    color: var(--accent-gold);
+}
+
+.sr-decided-status.status-dismissed {
+    background: rgba(229, 9, 20, 0.12);
+    color: var(--accent-primary);
+}
+
+/* ─── Recent searches panel ───────────────────────────────────────── */
+
+.recent-searches {
+    max-width: 600px;
+    margin: -0.4rem auto 0.75rem;
+    padding: 0.65rem 0.9rem 0.7rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    animation: popupFadeIn 0.15s ease;
+}
+
+.recent-searches-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.recent-searches-label {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+}
+
+.recent-searches-clear {
+    font-size: 0.62rem;
+    color: var(--text-muted);
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    font-family: inherit;
+    transition: color 0.15s;
+}
+
+.recent-searches-clear:hover {
+    color: var(--text-primary);
+}
+
+.recent-searches-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
+
+.recent-search-tag {
+    padding: 0.22rem 0.65rem;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 20px;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    font-family: inherit;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+}
+
+.recent-search-tag:hover {
+    color: var(--text-primary);
+    border-color: var(--accent-gold);
 }
 
 /* ─── Movie card (discover) ───────────────────────────────────────── */
@@ -617,6 +739,11 @@ h1 {
     color: var(--accent-green);
 }
 
+.source-badge.series {
+    background: rgba(72, 149, 239, 0.18);
+    color: #4895ef;
+}
+
 /* ─── Director line ──────────────────────────────────────────────── */
 
 .provider-row {
@@ -650,7 +777,7 @@ h1 {
 }
 
 .director-label {
-    color: #666;
+    color: var(--text-muted);
 }
 
 /* ─── Cast row ───────────────────────────────────────────────────── */
@@ -672,7 +799,7 @@ h1 {
 
 .cast-loading {
     font-size: 0.7rem;
-    color: #555;
+    color: var(--text-muted);
     padding: 0.3rem 0;
 }
 
@@ -821,16 +948,43 @@ h1 {
 .score-badge.rating {
     background: rgba(245, 197, 24, 0.15);
     color: var(--accent-gold);
+    cursor: pointer;
 }
 
 .score-badge.popularity {
     background: rgba(229, 9, 20, 0.12);
     color: #FF6B6B;
+    cursor: pointer;
 }
 
 .score-badge.small {
     font-size: 0.65rem;
     padding: 0.15rem 0.45rem;
+}
+
+.score-badge.imdb {
+    background: rgba(245, 197, 24, 0.12);
+    color: var(--accent-gold);
+    cursor: pointer;
+}
+
+.score-badge.rt {
+    background: rgba(250, 70, 22, 0.12);
+    color: #fa4616;
+    cursor: pointer;
+}
+
+.score-badge.mc {
+    background: rgba(102, 204, 51, 0.12);
+    color: #6c3;
+    cursor: pointer;
+}
+
+.card-ext-scores {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-bottom: var(--gap-sm);
 }
 
 /* ─── Genre badges ────────────────────────────────────────────────── */
@@ -907,7 +1061,7 @@ h1 {
 .swipe-hint {
     text-align: center;
     font-size: 0.7rem;
-    color: #555;
+    color: var(--text-muted);
     padding-top: var(--gap-sm);
 }
 
@@ -1154,20 +1308,20 @@ h1 {
 
 .detail-score {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     gap: 0.3rem;
     flex-wrap: wrap;
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.25rem;
 }
 
 .detail-score-number {
-    font-size: 1.5rem;
+    font-size: 1.1rem;
     font-weight: 700;
     color: var(--accent-gold);
 }
 
 .detail-score-denom {
-    font-size: 0.95rem;
+    font-size: 0.82rem;
     color: var(--text-muted);
     font-weight: 500;
 }
@@ -1175,7 +1329,6 @@ h1 {
 .detail-score-votes {
     font-size: 0.72rem;
     color: var(--text-muted);
-    align-self: center;
 }
 
 .detail-section {
@@ -1698,10 +1851,10 @@ h1 {
     font-size: 1.5rem;
 }
 
-/* Rating badge — top-left */
+/* Rating badge — bottom-left (above date strip, clear of Available/Soon badges at top) */
 .wl-rating-badge {
     position: absolute;
-    top: 0.3rem;
+    bottom: 1.6rem;
     left: 0.3rem;
     background: rgba(0, 0, 0, 0.75);
     color: var(--accent-gold);
@@ -1713,14 +1866,11 @@ h1 {
     backdrop-filter: blur(4px);
 }
 
-/* "Available" ribbon — top center */
+/* "Available" badge — top right */
 .wl-available-badge {
     position: absolute;
     top: 0.3rem;
-    left: 0;
-    right: 0;
-    display: flex;
-    justify-content: center;
+    right: 0.3rem;
 }
 
 .wl-available-badge span {
@@ -1816,6 +1966,32 @@ h1 {
 
 @media (max-width: 600px) {
     .wl-actions { opacity: 0.85; }
+}
+
+/* ─── Media type tabs ────────────────────────────────────────────── */
+
+.media-type-tabs {
+    display: flex;
+    gap: 0.35rem;
+    margin-bottom: 0.75rem;
+}
+
+.media-tab {
+    padding: 0.28rem 0.85rem;
+    border-radius: 20px;
+    border: 1px solid var(--border-color);
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s, border-color 0.2s;
+}
+
+.media-tab.active {
+    background: var(--accent-gold);
+    color: #fff;
+    border-color: var(--accent-gold);
 }
 
 /* ─── Dismissed view ──────────────────────────────────────────────── */
@@ -1944,6 +2120,170 @@ h1 {
 .toast.show {
     opacity: 1;
     transform: translateX(-50%) translateY(0);
+}
+
+/* ─── Score source label (small "TMDb" suffix inside rating badge) ── */
+
+.score-source-label {
+    font-size: 0.55em;
+    font-weight: 400;
+    opacity: 0.75;
+    letter-spacing: 0.2px;
+    margin-left: 0.1em;
+}
+
+/* ─── Detail score source label (below the ★ number) ─────────────── */
+
+.detail-score-label {
+    font-size: 0.62rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    cursor: pointer;
+}
+
+/* ─── External score row (IMDb / Rotten Tomatoes) ─────────────────── */
+
+.detail-external-scores {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-bottom: 0.6rem;
+    min-height: 1.6rem;
+}
+
+.detail-ext-score {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.22rem 0.6rem;
+    border-radius: 20px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.detail-ext-score.imdb-score {
+    background: rgba(245, 197, 24, 0.12);
+    color: var(--accent-gold);
+    border: 1px solid rgba(245, 197, 24, 0.2);
+}
+
+.detail-ext-score.rt-score {
+    background: rgba(250, 70, 22, 0.12);
+    color: #fa4616;
+    border: 1px solid rgba(250, 70, 22, 0.2);
+    cursor: pointer;
+}
+
+.detail-ext-score.imdb-link {
+    background: rgba(245, 197, 24, 0.08);
+    color: var(--accent-gold);
+    border: 1px solid rgba(245, 197, 24, 0.18);
+    text-decoration: none;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.detail-ext-score.imdb-link:hover {
+    background: rgba(245, 197, 24, 0.2);
+}
+
+.detail-ext-score.metacritic-score {
+    background: rgba(102, 204, 51, 0.12);
+    color: #6c3;
+    border: 1px solid rgba(102, 204, 51, 0.22);
+    cursor: pointer;
+}
+
+.detail-scores-loading {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    opacity: 0.6;
+}
+
+/* ─── Metric info popup ──────────────────────────────────────────── */
+
+.info-popup {
+    position: fixed;
+    bottom: 6rem;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 250;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: 1rem 1.2rem;
+    max-width: 300px;
+    width: calc(100vw - 2rem);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    animation: popupFadeIn 0.18s ease;
+}
+
+@keyframes popupFadeIn {
+    from { opacity: 0; transform: translateX(-50%) translateY(10px); }
+    to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+.info-popup-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.55rem;
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.info-popup-close {
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    cursor: pointer;
+    padding: 0.2rem 0.35rem;
+    border-radius: var(--radius-sm);
+    line-height: 1;
+    transition: color 0.2s, background 0.2s;
+}
+
+.info-popup-close:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.07);
+}
+
+.info-popup-desc {
+    font-size: 0.73rem;
+    color: var(--text-muted);
+    line-height: 1.5;
+    margin-bottom: 0.75rem;
+}
+
+.info-popup-ranges {
+    display: flex;
+    flex-direction: column;
+    gap: 0.28rem;
+}
+
+.range-item {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-size: 0.71rem;
+}
+
+.range-val {
+    font-weight: 700;
+    color: #FF6B6B;
+    min-width: 72px;
+    font-variant-numeric: tabular-nums;
+}
+
+.range-label {
+    color: var(--text-muted);
 }
 
 /* ─── Mobile responsive ───────────────────────────────────────────── */
